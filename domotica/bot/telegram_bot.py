@@ -810,6 +810,21 @@ class TelegramBot:
             self._answer_callback_query(cb_id, "Operazione annullata.")
             self._edit_message_text(chat_id, msg_id, "❌ *Operazione Modalità Vacanza annullata.*")
 
+        elif data.startswith("iperf_target:"):
+            target_ip = data.split(":", 1)[1]
+            self._answer_callback_query(cb_id, f"Avvio test verso {target_ip}...")
+            self._edit_message_text(chat_id, msg_id, f"⏳ _Esecuzione test banda passante reale iperf3 verso_ `{target_ip}` _(5s)..._")
+
+            def _worker_iperf():
+                report = self.tracker.run_iperf_speedtest(target_ip=target_ip, duration=5)
+                self._edit_message_text(chat_id, msg_id, report)
+
+            threading.Thread(target=_worker_iperf, daemon=True).start()
+
+        elif data == "iperf_cancel":
+            self._answer_callback_query(cb_id, "Test annullato.")
+            self._edit_message_text(chat_id, msg_id, "❌ *Test iperf3 annullato.*")
+
         elif data.startswith("print_exec:"):
             print_id = data.split(":", 1)[1]
             p_data = self.pending_prints.pop(print_id, None)
@@ -2323,10 +2338,26 @@ class TelegramBot:
 
         elif cmd in ["/iperf", "/speedtest"]:
             parts = text_clean.split()
-            target_ip = parts[1] if len(parts) > 1 else "192.168.1.1"
-            self.send_message(chat_id, f"⏳ _Esecuzione test banda passante reale iperf3 verso {target_ip} (5s)..._")
-            report = self.tracker.run_iperf_speedtest(target_ip=target_ip, duration=5)
-            self.send_message(chat_id, report)
+            if len(parts) > 1:
+                target_ip = parts[1].strip()
+                def _do_iperf():
+                    self.send_message(chat_id, f"⏳ _Esecuzione test banda passante reale iperf3 verso_ `{target_ip}` _(5s)..._")
+                    report = self.tracker.run_iperf_speedtest(target_ip=target_ip, duration=5)
+                    self.send_message(chat_id, report)
+                threading.Thread(target=_do_iperf, daemon=True).start()
+            else:
+                iperf_kb = {
+                    "inline_keyboard": [
+                        [{"text": "🛡️ Gateway (192.168.1.1)", "callback_data": "iperf_target:192.168.1.1"}],
+                        [{"text": "📶 Access Point Box (192.168.3.2)", "callback_data": "iperf_target:192.168.3.2"}],
+                        [{"text": "❌ Annulla", "callback_data": "iperf_cancel"}]
+                    ]
+                }
+                msg_txt = (
+                    "🚀 *TEST BANDA PASSANTE REALE (iperf3)*\n\n"
+                    "Seleziona il dispositivo di destinazione verso cui effettuare il test di velocità, oppure scrivi `/iperf <IP>`:"
+                )
+                self.send_message(chat_id, msg_txt, reply_markup=iperf_kb)
 
         elif cmd in ["/bandainuso", "/banda", "/traffico", "/traffic", "/livebanda", "/consumo"]:
             self.send_message(chat_id, "⏳ _Calcolo della banda passante istantanea in uso e scansione processi in corso..._")
