@@ -1,5 +1,5 @@
 #!/bin/sh
-# Script di sincronizzazione avanzata Git -> GitHub con monitoraggio in tempo reale
+# Script di sincronizzazione Git -> GitHub con avanzamento sempre attivo di default
 cd /www || exit 1
 
 # Definizione colori per terminale ANSI
@@ -14,36 +14,34 @@ printf "\n${CYAN}========================================================${NC}\n
 printf "${BOLD}   🔄 SINCRONIZZAZIONE PROGETTO DOMOTICA ➔ GITHUB${NC}\n"
 printf "${CYAN}========================================================${NC}\n"
 
+# [1/4] Controllo stato modifiche
 printf "${YELLOW}🔍 [1/4] Controllo modifiche locali in corso...${NC}\n"
 STATUS_OUTPUT=$(git status --porcelain)
 
-if [ -z "$STATUS_OUTPUT" ]; then
-    printf "\n${GREEN}✅ Nessuna modifica rilevata.${NC}\n"
-    printf "Tutti i file sono già sincronizzati all'ultima versione su GitHub!\n"
-    printf "${CYAN}========================================================${NC}\n\n"
-    exit 0
+if [ -n "$STATUS_OUTPUT" ]; then
+    printf "\n${BOLD}📋 [2/4] File modificati o aggiunti da inviare:${NC}\n"
+    git status -s
+    printf "\n"
+
+    printf "${YELLOW}📦 [3/4] Aggiunta file all'archivio e creazione commit...${NC}\n"
+    git add -A
+    MSG="${1:-Update domotica: $(date '+%d/%m/%Y %H:%M:%S')}"
+    git commit -m "$MSG"
+    printf "${GREEN}✔ Commit locale creato con successo.${NC}\n"
+else
+    printf "${GREEN}✔ Nessun nuovo file da indicizzare. Procedo direttamente con la sincronizzazione remota.${NC}\n"
+    MSG="${1:-Verifica sincronizzazione}"
 fi
-
-printf "\n${BOLD}📋 [2/4] File modificati o aggiunti da inviare:${NC}\n"
-git status -s
-printf "\n"
-
-printf "${YELLOW}📦 [3/4] Aggiunta file all'archivio e creazione commit...${NC}\n"
-git add -A
-
-# Messaggio di commit personalizzato o con data/ora automatica
-MSG="${1:-Update domotica: $(date '+%d/%m/%Y %H:%M:%S')}"
-git commit -m "$MSG"
 
 COMMIT_HASH=$(git rev-parse --short HEAD)
 
-printf "\n${YELLOW}🚀 [4/4] Caricamento su GitHub in corso (git push)...${NC}\n"
-# --progress forza la visualizzazione della percentuale di upload in tempo reale
+# [4/4] Caricamento su GitHub (SEMPRE ATTIVO DI DEFAULT)
+printf "\n${YELLOW}🚀 [4/4] Caricamento / Verifica su GitHub in corso (git push)...${NC}\n"
 git push --progress origin main
 
 if [ $? -eq 0 ]; then
     printf "\n${GREEN}========================================================${NC}\n"
-    printf "${GREEN}🎉 SINCRONIZZAZIONE COMPLETATA CON SUCCESSO!${NC}\n"
+    printf "${GREEN}🎉 SINCRONIZZAZIONE CON GITHUB COMPLETATA CON SUCCESSO!${NC}\n"
     printf "${GREEN}========================================================${NC}\n"
     printf "${BOLD}📌 Hash Commit :${NC} %s\n" "$COMMIT_HASH"
     printf "${BOLD}💬 Messaggio   :${NC} %s\n" "$MSG"
