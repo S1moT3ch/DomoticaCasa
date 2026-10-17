@@ -37,6 +37,7 @@
 **/*.sqlite
 **/*.sqlite3
 **/logs/
+**/charts/
 **/*.log
 **/shelly_power_debug.txt
 **/test_payload.json
