@@ -1,0 +1,67 @@
+# =================================================================
+# GITIGNORE PER PROGETTO DOMOTICA & WEB OPENWRT
+# =================================================================
+
+# --- 1. CREDENZIALI, CHIAVI E TOKEN DI ACCESSO ---
+**/.env
+**/.env.*
+!**/.env.example
+**/.secrets*
+**/.nvr_secrets
+!**/.nvr_secrets.example
+
+# Token OAuth e API
+**/tokens.json
+!**/tokens.json.example
+**/*_tokens.json
+!**/*_tokens.json.example
+**/tv_cucina_token.txt
+!**/tv_cucina_token.txt.example
+**/.vercel/
+
+# --- 2. DATI PERSONALI E REGISTRO UTENTI ---
+**/authorized_users.json
+!**/authorized_users.json.example
+**/pending_users.json
+!**/pending_users.json.example
+**/rubrica.json
+!**/rubrica.json.example
+**/vacation_mode.json
+**/aliases.json
+
+# --- 3. DATABASE SQLITE E LOG DI ESECUZIONE ---
+**/*.db
+**/*.db-journal
+**/*.db-wal
+**/*.db-shm
+**/*.sqlite
+**/*.sqlite3
+**/logs/
+**/*.log
+**/shelly_power_debug.txt
+**/test_payload.json
+
+# --- 4. BYTECODE PYTHON E CACHE ---
+**/__pycache__/
+**/*.py[cod]
+*$py.class
+**/.pytest_cache/
+
+# --- 5. RISORSE TEMPORANEE, STREAMING VIDEO E NVR ---
+/stream/
+/nvr/stream/
+/nvr/archivio
+/nvr/archivio/
+**/cam*_live
+**/stream*_live
+
+# --- 6. FILE DI SISTEMA OPENWRT NON SPECIFICI DELLA DOMOTICA ---
+/luci-static/
+
+# --- 7. FILE DI SISTEMA OPERATIVO / IDE ---
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/

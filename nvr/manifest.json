@@ -1,0 +1,23 @@
+{
+  "short_name": "NVR",
+  "name": "NVR Dashboard",
+  "icons": [
+    {
+      "src": "/icon.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/cgi-bin/login.sh",
+  "display": "standalone",
+  "background_color": "#0b0b0b",
+  "theme_color": "#000000",
+  "orientation": "portrait"
+}

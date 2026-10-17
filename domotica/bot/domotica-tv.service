@@ -1,0 +1,16 @@
+[Unit]
+Description=Samsung TV & SinricPro Bridge
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/www/domotica/bot
+ExecStart=/usr/bin/python3 /www/domotica/bot/samsung_tv_manager.py
+Restart=always
+RestartSec=10
+MemoryHigh=60M
+MemoryMax=80M
+
+[Install]
+WantedBy=multi-user.target

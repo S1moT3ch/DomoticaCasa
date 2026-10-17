@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Daikin Control - Loxone Style Premium</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+    <style>
+        :root {
+            --lox-bg: #000000;
+            --lox-card: #141414;
+            --lox-card-inner: #1e1e1e;
+            --lox-green: #67b021;
+            --lox-blue: #00a1e0;
+            --lox-orange: #f39200;
+            --lox-text: #ffffff;
+            --lox-subtext: #777777;
+            --lox-btn-bg: #2b2b2b;
+            --lox-border: #262626;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--lox-bg);
+            color: var(--lox-text);
+            margin: 0;
+            padding: 15px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            touch-action: manipulation;
+            box-sizing: border-box;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .card {
+            background-color: var(--lox-card);
+            border-radius: 16px;
+            padding: 20px;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.7);
+            border: 1px solid var(--lox-border);
+            text-align: center;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 25px;
+            border-bottom: 1px solid var(--lox-border);
+            padding-bottom: 15px;
+        }
+
+        .status-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #333;
+            box-shadow: 0 0 4px rgba(0,0,0,0.5);
+        }
+        .status-online { 
+            background-color: var(--lox-green); 
+            box-shadow: 0 0 8px var(--lox-green);
+        }
+
+        /* Nuova Zona Termostato Integrata */
+        .thermostat-zone {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--lox-card-inner);
+            padding: 15px 10px;
+            border-radius: 14px;
+            border: 1px solid var(--lox-border);
+            margin-bottom: 25px;
+        }
+
+        .temp-display {
+            flex-grow: 1;
+        }
+
+        .target-temp-wrapper {
+            font-size: 64px;
+            font-weight: 200;
+            color: var(--lox-blue);
+            line-height: 1;
+            letter-spacing: -2px;
+        }
+
+        .unit { font-size: 24px; margin-left: 2px; vertical-align: super; font-weight: 300; }
+
+        .ambient-temp {
+            font-size: 14px;
+            color: var(--lox-subtext);
+            margin-top: 8px;
+            font-weight: 500;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-round {
+            width: 56px;
+            height: 56px;
+            border-radius: 12px;
+            border: none;
+            background-color: var(--lox-btn-bg);
+            color: white;
+            font-size: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.15s, transform 0.1s;
+        }
+        .btn-round:active { transform: scale(0.92); background-color: #3a3a3a; }
+
+        .section-title {
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--lox-subtext);
+            letter-spacing: 1.2px;
+            margin: 20px 0 10px 0;
+            text-transform: uppercase;
+            text-align: left;
+            padding-left: 4px;
+        }
+
+        .control-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
+        }
+
+        .btn-rect {
+            background-color: var(--lox-btn-bg);
+            border: 1px solid transparent;
+            color: #aaaaaa;
+            padding: 14px 4px;
+            border-radius: 8px;
+            font-size: 12px;
+            text-transform: uppercase;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .btn-rect:active { transform: scale(0.96); }
+
+        .btn-rect.active {
+            background-color: transparent;
+            border-color: var(--lox-blue);
+            color: var(--lox-blue);
+            box-shadow: inset 0 0 8px rgba(0, 161, 224, 0.15);
+        }
+
+        .btn-rect.active-fan {
+            background-color: transparent;
+            border-color: var(--lox-green);
+            color: var(--lox-green);
+            box-shadow: inset 0 0 8px rgba(103, 176, 33, 0.15);
+        }
+
+        /* Pulsante Power ad Anello in alto */
+        .btn-power {
+            background: none;
+            border: 2px solid #333;
+            color: #555;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0;
+            position: relative;
+            transition: all 0.2s;
+        }
+        .btn-power::after {
+            content: '';
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #333;
+            transition: all 0.2s;
+        }
+
+        .btn-power.on {
+            border-color: var(--lox-orange);
+        }
+        .btn-power.on::after {
+            background: var(--lox-orange);
+            box-shadow: 0 0 10px var(--lox-orange);
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="card">
+        <div class="header">
+            <div style="text-align: left;">
+                <span style="font-size: 13px; font-weight: 700; color: #fff; letter-spacing: 0.5px;">CANALIZZATO</span>
+                <div class="status-wrapper" style="margin-top: 2px;">
+                    <div id="status-led" class="status-dot"></div>
+                    <span id="status-text" style="font-size: 10px; color: var(--lox-subtext); font-weight: bold; text-transform: uppercase;">OFFLINE</span>
+                </div>
+            </div>
+            <button id="btn-power" class="btn-power" onclick="handlePowerToggle()">Power</button>
+        </div>
+
+        <div class="thermostat-zone">
+            <button class="btn-round" onclick="adjustTemp(-1)">&minus;</button>
+            
+            <div class="temp-display">
+                <div class="target-temp-wrapper">
+                    <span id="target-temp">--</span><span class="unit">&deg;C</span>
+                </div>
+                <div class="ambient-temp">
+                    AMBIENTE: <span id="room-temp">--</span>&deg;C
+                </div>
+            </div>
+            
+            <button class="btn-round" onclick="adjustTemp(1)">&plus;</button>
+        </div>
+
+        <div class="section-title">Modalit&agrave;</div>
+        <div class="control-grid" style="grid-template-columns: repeat(2, 1fr);">
+            <button id="mode-cooling" class="btn-rect" onclick="handleModeChange('cooling')">Freddo</button>
+            <button id="mode-heating" class="btn-rect" onclick="handleModeChange('heating')">Caldo</button>
+            <button id="mode-dry" class="btn-rect" onclick="handleModeChange('dry')">Secco</button>
+            <button id="mode-fan" class="btn-rect" onclick="handleModeChange('fan')">Ventola</button>
+        </div>
+
+        <div class="section-title">Ventilazione</div>
+        <div class="control-grid" style="grid-template-columns: repeat(3, 1fr); gap: 6px;">
+            <button id="fan-auto" class="btn-rect" onclick="handleFanChange('auto')" style="grid-column: span 1;">Auto</button>
+            <button id="fan-quiet" class="btn-rect" onclick="handleFanChange('quiet')" style="grid-column: span 2;">Silenzioso</button>
+        </div>
+        <div class="control-grid" style="grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 6px;">
+            <button id="fan-1" class="btn-rect" onclick="handleFanChange('1')">V1</button>
+            <button id="fan-2" class="btn-rect" onclick="handleFanChange('2')">V2</button>
+            <button id="fan-3" class="btn-rect" onclick="handleFanChange('3')">V3</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const MQTT_URL = "ws://" + location.hostname + ":9001";
+    const BASE_TOPIC = "Canalizzato.daikin";
+    const client = mqtt.connect(MQTT_URL);
+    
+    let currentData = { power: "off", mode: "cooling", target_temp: 22, room_temp: "--", fan_speed: "auto" };
+    
+    let isInteractingTemp = false;
+    let isInteractingMode = false;
+    let isInteractingPower = false;
+    let isInteractingFan = false;
+    
+    let debounceTimer = null;
+
+    client.on('connect', () => {
+        document.getElementById('status-led').classList.add('status-online');
+        document.getElementById('status-text').innerText = "ONLINE";
+        client.subscribe(BASE_TOPIC + "/status");
+        client.publish(BASE_TOPIC + "/request_update", "refresh");
+    });
+
+    client.on('message', (topic, message) => {
+        if (topic === BASE_TOPIC + "/status") {
+            try {
+                const data = JSON.parse(message.toString());
+                
+                if (!isInteractingPower) currentData.power = data.power;
+                if (!isInteractingMode) currentData.mode = data.mode;
+                if (!isInteractingTemp) currentData.target_temp = data.target_temp;
+                if (!isInteractingFan) currentData.fan_speed = data.fan_speed;
+                
+                currentData.room_temp = typeof data.room_temp === 'number' ? data.room_temp.toFixed(1) : data.room_temp;
+                
+                updateUI();
+            } catch(e) { console.error("Errore parsing MQTT", e); }
+        }
+    });
+
+    function updateUI() {
+        document.getElementById('target-temp').innerText = currentData.target_temp;
+        document.getElementById('room-temp').innerText = currentData.room_temp;
+        
+        const pBtn = document.getElementById('btn-power');
+        pBtn.classList.toggle('on', currentData.power === 'on');
+
+        ['cooling', 'heating', 'dry', 'fan'].forEach(m => {
+            document.getElementById('mode-' + m).classList.toggle('active', currentData.mode === m);
+        });
+
+        ['auto', 'quiet', '1', '2', '3'].forEach(f => {
+            const el = document.getElementById('fan-' + f);
+            if (el) el.classList.toggle('active-fan', currentData.fan_speed.toString() === f);
+        });
+    }
+
+    function adjustTemp(delta) {
+        isInteractingTemp = true;
+        currentData.target_temp += delta;
+        document.getElementById('target-temp').innerText = currentData.target_temp;
+
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            client.publish(BASE_TOPIC + "/temp", currentData.target_temp.toString());
+            setTimeout(() => { isInteractingTemp = false; }, 3500);
+        }, 500);
+    }
+
+    function handleModeChange(newMode) {
+        isInteractingMode = true;
+        currentData.mode = newMode;
+        updateUI();
+        client.publish(BASE_TOPIC + "/mode", newMode);
+        setTimeout(() => { isInteractingMode = false; }, 3500);
+    }
+
+    function handleFanChange(newSpeed) {
+        isInteractingFan = true;
+        currentData.fan_speed = newSpeed;
+        updateUI();
+        client.publish(BASE_TOPIC + "/fan", newSpeed);
+        setTimeout(() => { isInteractingFan = false; }, 3500);
+    }
+
+    function handlePowerToggle() {
+        isInteractingPower = true;
+        const newVal = currentData.power === 'on' ? 'off' : 'on';
+        currentData.power = newVal;
+        updateUI();
+        client.publish(BASE_TOPIC + "/power", newVal);
+        setTimeout(() => { isInteractingPower = false; }, 4000);
+    }
+</script>
+</body>
+</html>

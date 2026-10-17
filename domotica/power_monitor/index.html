@@ -1,0 +1,1350 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+    <title>Shelly EM — Monitor Consumi Rete Casa</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js + Hammer.js (necessario PRIMA del plugin zoom per i touch gestures) + Zoom plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+        :root {
+            --lox-bg: #0f0f0f;
+            --lox-card: #1a1a1a;
+            --lox-border: #2a2a2a;
+            --lox-green: #6ab31d;
+            --lox-green-hover: #7bc524;
+            --lox-amber: #f59e0b;
+            --lox-cyan: #06b6d4;
+            --lox-purple: #a855f7;
+            --lox-red: #ef4444;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        html {
+            overflow-x: hidden;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        body {
+            background-color: var(--lox-bg);
+            color: #ffffff;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            min-height: 100vh;
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .lox-card {
+            background-color: var(--lox-card);
+            border: 1px solid var(--lox-border);
+            border-radius: 12px;
+            transition: all 0.3s ease;
+            width: 100%;
+            max-width: 100%;
+            box-sizing: border-box;
+            overflow: hidden;
+            min-width: 0;
+        }
+
+        .stat-card {
+            background-color: var(--lox-card);
+            border: 1px solid var(--lox-border);
+            border-radius: 12px;
+            padding: 10px 10px;
+            min-width: 0;
+            overflow: hidden;
+            box-sizing: border-box;
+            transition: border-color 0.25s, box-shadow 0.25s;
+        }
+        @media (min-width: 640px) {
+            .stat-card { padding: 18px 20px; }
+        }
+        .stat-card:hover {
+            border-color: rgba(106, 179, 29, 0.3);
+        }
+
+        /* ---- Mini-Stats Grid Interno alle Stat-Card ---- */
+        .stat-minis-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 4px;
+            margin-top: 8px;
+            padding-top: 6px;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .stat-minis-grid.two-col {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .mini-stat {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            min-width: 0;
+            overflow: hidden;
+        }
+        .mini-stat .lbl {
+            font-size: 8px;
+            font-weight: 700;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+            color: #6b7280;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .mini-stat .num {
+            font-size: 11px;
+            font-weight: 600;
+            font-family: monospace;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* ---- Bottoni Range: Loxone Style con Swipe Orizzontale ---- */
+        .range-row {
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+            padding-bottom: 2px;
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
+        }
+        .range-row::-webkit-scrollbar { display: none; }
+
+        .range-btn {
+            flex-shrink: 0;
+            min-height: 34px;
+            padding: 0 12px;
+            border-radius: 8px;
+            border: 1px solid var(--lox-border);
+            background: #141414;
+            color: #9ca3af;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: .04em;
+            text-transform: uppercase;
+            cursor: pointer;
+            touch-action: manipulation;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+        .range-btn:active { transform: scale(0.96); }
+        .range-btn.active {
+            background: rgba(106, 179, 29, 0.14);
+            border-color: var(--lox-green);
+            color: var(--lox-green);
+        }
+
+        /* ---- Tab Buttons ---- */
+        .tabs-row {
+            display: flex;
+            gap: 6px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
+            padding-bottom: 2px;
+            max-width: 100%;
+            min-width: 0;
+            box-sizing: border-box;
+        }
+        .tabs-row::-webkit-scrollbar { display: none; }
+
+        .tab-btn {
+            flex-shrink: 0;
+            min-height: 32px;
+            padding: 0 12px;
+            border-radius: 8px;
+            border: 1px solid transparent;
+            background: #141414;
+            color: #6b7280;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+            cursor: pointer;
+            touch-action: manipulation;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+        .tab-btn:active { transform: scale(0.96); }
+        .tab-btn.active {
+            background: rgba(106, 179, 29, 0.12);
+            border-color: rgba(106, 179, 29, 0.4);
+            color: var(--lox-green);
+        }
+
+        /* ---- Status Badge & Live Dot ---- */
+        .live-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(106, 179, 29, 0.1);
+            border: 1px solid rgba(106, 179, 29, 0.3);
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: var(--lox-green);
+            white-space: nowrap;
+        }
+        .live-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--lox-green);
+            animation: pulse-live 1.8s ease-in-out infinite;
+        }
+        @keyframes pulse-live {
+            0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(106, 179, 29, 0.6); }
+            50%      { opacity: 0.6; box-shadow: 0 0 0 5px rgba(106, 179, 29, 0); }
+        }
+
+        /* ---- Valori Numerici Puliti con Scaling Fluido ---- */
+        .val-big {
+            font-size: clamp(1.2rem, 4.2vw, 2.2rem);
+            font-weight: 700;
+            line-height: 1.1;
+            letter-spacing: -0.03em;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .val-unit {
+            font-size: 0.72rem;
+            font-weight: 600;
+            opacity: 0.6;
+            margin-left: 2px;
+        }
+
+        /* ---- Spinner di Caricamento ---- */
+        .spinner {
+            border: 2px solid rgba(106, 179, 29, 0.15);
+            border-top-color: var(--lox-green);
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ---- Alert Sovraccarico ---- */
+        .alert-bar {
+            display: none;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.35);
+            border-radius: 10px;
+            padding: 10px 14px;
+            font-size: 12px;
+            color: var(--lox-red);
+            font-weight: 600;
+            width: 100%;
+            box-sizing: border-box;
+            word-break: break-word;
+        }
+        .alert-bar.show { display: flex; align-items: center; gap: 8px; }
+
+        /* ---- Header Riga Grafico ---- */
+        .chart-header-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 10px;
+            width: 100%;
+            box-sizing: border-box;
+            min-width: 0;
+        }
+        @media (max-width: 520px) {
+            .chart-header-row {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+            .chart-header-row .tabs-row {
+                width: 100%;
+            }
+        }
+
+        /* ---- Canvas con Touch Action per Pinch Zoom ---- */
+        .chart-touch-wrap {
+            position: relative;
+            width: 100%;
+            max-width: 100%;
+            min-width: 0;
+            touch-action: pan-y;
+            user-select: none;
+            -webkit-user-select: none;
+            box-sizing: border-box;
+        }
+        canvas {
+            display: block;
+            width: 100% !important;
+            max-width: 100% !important;
+            touch-action: pan-y;
+            box-sizing: border-box;
+        }
+
+        /* ---- Footer Card & Zoom Hint ---- */
+        .chart-card-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            width: 100%;
+            box-sizing: border-box;
+            flex-wrap: wrap;
+        }
+        .zoom-hint {
+            font-size: 10px;
+            color: #6b7280;
+            letter-spacing: .02em;
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        /* ---- Bottone Schermo Intero in Basso a Destra della Card ---- */
+        .fs-corner-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 5px 12px;
+            background: #141414;
+            border: 1px solid var(--lox-border);
+            border-radius: 8px;
+            color: #d1d5db;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+            margin-left: auto;
+        }
+        .fs-corner-btn:hover {
+            border-color: var(--lox-green);
+            color: #ffffff;
+            background: rgba(106, 179, 29, 0.14);
+        }
+        .fs-corner-btn:active {
+            transform: scale(0.96);
+        }
+
+        /* ---- Modalità Schermo Intero Orizzontale (Landscape / Fullscreen) ---- */
+        .chart-fullscreen-mode {
+            position: fixed !important;
+            inset: 0 !important;
+            z-index: 99999 !important;
+            width: 100vw !important;
+            height: 100vh !important;
+            height: 100dvh !important;
+            margin: 0 !important;
+            border-radius: 0 !important;
+            border: none !important;
+            background: #090909 !important;
+            padding: 4px 10px !important;
+            display: flex !important;
+            flex-direction: column !important;
+            overflow: hidden !important;
+            box-sizing: border-box !important;
+        }
+        /* Nasconde COMPLETAMENTE le indicazioni di zoom, il footer e il pulsante fullscreen per massimizzare l'altezza */
+        .chart-fullscreen-mode .chart-card-footer,
+        .chart-fullscreen-mode .zoom-hint,
+        .chart-fullscreen-mode .fs-corner-btn {
+            display: none !important;
+            height: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            border: none !important;
+        }
+        /* Layout orizzontale compatto per header in fullscreen (spazio per Esci) */
+        .chart-fullscreen-mode .chart-header-row {
+            flex-direction: row !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+            margin-bottom: 2px !important;
+            padding-right: 80px !important;
+            min-height: 26px !important;
+        }
+        .chart-fullscreen-mode .range-row {
+            margin-bottom: 2px !important;
+            gap: 4px !important;
+            padding-bottom: 0 !important;
+        }
+        .chart-fullscreen-mode .range-btn,
+        .chart-fullscreen-mode .tab-btn {
+            min-height: 24px !important;
+            height: 24px !important;
+            padding: 0 8px !important;
+            font-size: 9.5px !important;
+            border-radius: 6px !important;
+        }
+        .chart-fullscreen-mode #chart-main-wrap,
+        .chart-fullscreen-mode #chart-vc-wrap {
+            flex: 1 1 auto !important;
+            width: 100% !important;
+            min-height: 0 !important;
+            height: auto !important;
+        }
+        .chart-fullscreen-mode canvas {
+            height: 100% !important;
+        }
+
+        /* ---- Bottone Chiusura Fullscreen Overlay ---- */
+        .fs-close-btn {
+            position: absolute;
+            top: 6px;
+            right: 10px;
+            z-index: 100000;
+            display: none;
+            align-items: center;
+            gap: 4px;
+            padding: 5px 12px;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            border-radius: 7px;
+            color: #ef4444;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: .05em;
+            text-transform: uppercase;
+            cursor: pointer;
+        }
+        .fs-close-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* ---- Header Principale compatto ---- */
+        .page-header {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 14px;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        @media (min-width: 640px) {
+            .page-header {
+                flex-direction: row;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 22px;
+            }
+        }
+
+        .main-wrap {
+            padding: 8px;
+            max-width: 1100px;
+            margin: 0 auto;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        @media (min-width: 640px) {
+            .main-wrap { padding: 20px 24px; }
+        }
+    </style>
+</head>
+<body class="pb-12">
+<div class="main-wrap">
+
+    <!-- HEADER LOXONE STYLE -->
+    <header class="page-header">
+        <div>
+            <a href="/index.html" class="inline-flex items-center gap-1.5 text-xs text-gray-400 hover:text-[#6ab31d] transition-colors mb-1.5">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+                Dashboard
+            </a>
+            <h1 class="text-xl sm:text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+                <span class="text-[#6ab31d]">⚡</span> Monitor Consumi <span id="header-area-name" class="text-[#6ab31d]">Casa</span>
+            </h1>
+            <p id="header-device-sub" class="text-[10px] text-gray-500 uppercase tracking-widest font-bold mt-0.5">Shelly EM — Rete Elettrica Casa</p>
+            
+            <!-- SELETTORE AREA CASA / GARAGE -->
+            <div class="inline-flex items-center p-0.5 bg-[#141414] border border-[#2a2a2a] rounded-lg mt-2.5 gap-1">
+                <button id="btn-device-home" onclick="switchDevice('PowerMeterHome.shelly')" class="px-3 py-1 text-[11px] font-bold rounded-md transition-all">🏠 Casa</button>
+                <button id="btn-device-box" onclick="switchDevice('PowerMeterBox.shelly')" class="px-3 py-1 text-[11px] font-medium rounded-md transition-all">🚗 Garage</button>
+            </div>
+        </div>
+        <div class="flex items-center gap-2.5 flex-wrap">
+            <div class="live-badge">
+                <span class="live-dot" id="live-dot-el"></span>
+                <span id="live-time">—</span>
+            </div>
+            <button onclick="resetZoom()" class="range-btn flex items-center gap-1" title="Ripristina zoom originale">
+                <svg class="w-3 h-3 text-[#6ab31d]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+                Reset Zoom
+            </button>
+            <button onclick="refreshAll()" class="range-btn flex items-center gap-1" title="Ricarica dati">
+                ↺ Aggiorna
+            </button>
+        </div>
+    </header>
+
+    <div class="flex flex-col gap-4">
+
+        <!-- ALERT SOVRACCARICO -->
+        <div id="alert-overload" class="alert-bar">
+            <svg class="w-4 h-4 shrink-0 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            <span id="alert-msg"></span>
+        </div>
+
+        <!-- STATS CARDS: 2×2 mobile, 4×1 desktop -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 w-full">
+
+            <!-- Potenza -->
+            <div class="stat-card">
+                <div class="text-[9px] font-bold uppercase tracking-widest text-gray-500 mb-1 flex items-center justify-between">
+                    <span>Potenza Live</span>
+                    <span class="w-2 h-2 rounded-full bg-[#6ab31d]/60"></span>
+                </div>
+                <div class="val-big text-[#6ab31d]" id="live-pow">—<span class="val-unit">W</span></div>
+                <div class="stat-minis-grid">
+                    <div class="mini-stat"><span class="lbl">Min</span><span class="num text-gray-400" id="stat-min-w">—</span></div>
+                    <div class="mini-stat"><span class="lbl">Max</span><span class="num text-amber-400" id="stat-max-w">—</span></div>
+                    <div class="mini-stat"><span class="lbl">Media</span><span class="num text-[#6ab31d]" id="stat-avg-w">—</span></div>
+                </div>
+            </div>
+
+            <!-- Tensione -->
+            <div class="stat-card">
+                <div class="text-[9px] font-bold uppercase tracking-widest text-gray-500 mb-1 flex items-center justify-between">
+                    <span>Tensione</span>
+                    <span class="w-2 h-2 rounded-full bg-amber-400/60"></span>
+                </div>
+                <div class="val-big text-amber-400" id="live-v">—<span class="val-unit">V</span></div>
+                <div class="stat-minis-grid">
+                    <div class="mini-stat"><span class="lbl">Min</span><span class="num text-gray-400" id="stat-min-v">—</span></div>
+                    <div class="mini-stat"><span class="lbl">Max</span><span class="num text-amber-400" id="stat-max-v">—</span></div>
+                    <div class="mini-stat"><span class="lbl">Media</span><span class="num text-amber-400" id="stat-avg-v">—</span></div>
+                </div>
+            </div>
+
+            <!-- Corrente -->
+            <div class="stat-card">
+                <div class="text-[9px] font-bold uppercase tracking-widest text-gray-500 mb-1 flex items-center justify-between">
+                    <span>Corrente</span>
+                    <span class="w-2 h-2 rounded-full bg-emerald-400/60"></span>
+                </div>
+                <div class="val-big text-emerald-400" id="live-a">—<span class="val-unit">A</span></div>
+                <div class="stat-minis-grid">
+                    <div class="mini-stat"><span class="lbl">Min</span><span class="num text-gray-400" id="stat-min-a">—</span></div>
+                    <div class="mini-stat"><span class="lbl">Max</span><span class="num text-emerald-400" id="stat-max-a">—</span></div>
+                    <div class="mini-stat"><span class="lbl">Media</span><span class="num text-emerald-400" id="stat-avg-a">—</span></div>
+                </div>
+            </div>
+
+            <!-- Energia / Costo -->
+            <div class="stat-card">
+                <div class="text-[9px] font-bold uppercase tracking-widest text-gray-500 mb-1 flex items-center justify-between">
+                    <span>Energia</span>
+                    <span class="w-2 h-2 rounded-full bg-purple-400/60"></span>
+                </div>
+                <div class="val-big text-purple-400" id="live-kwh">—<span class="val-unit">kWh</span></div>
+                <div class="stat-minis-grid two-col">
+                    <div class="mini-stat"><span class="lbl">Costo Est.</span><span class="num text-purple-400" id="stat-cost">—</span></div>
+                    <div class="mini-stat"><span class="lbl">Periodo</span><span class="num text-gray-400" id="stat-period">—</span></div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- GRAFICO PRINCIPALE CONSUMI -->
+        <div id="chart-card-main" class="lox-card p-3 sm:p-5 relative">
+            <!-- Header Grafico -->
+            <div class="chart-header-row">
+                <div class="flex items-center gap-2">
+                    <span class="text-xs font-bold uppercase tracking-wider text-gray-300">Andamento Potenza</span>
+                    <div id="loading-main" class="spinner"></div>
+                </div>
+                <div class="tabs-row">
+                    <button class="tab-btn active" id="tab-line" onclick="switchTab('line')">📈 Linee</button>
+                    <button class="tab-btn" id="tab-bar" onclick="switchTab('bar')">📊 Ore</button>
+                    <button class="tab-btn" id="tab-daily" onclick="switchTab('daily')">📅 Giorni</button>
+                </div>
+            </div>
+
+            <!-- Selettore Range Orizzontale -->
+            <div class="range-row mb-3">
+                <button class="range-btn" onclick="setRange(event,'1h')">1H</button>
+                <button class="range-btn" onclick="setRange(event,'6h')">6H</button>
+                <button class="range-btn active" onclick="setRange(event,'24h')">24H</button>
+                <button class="range-btn" onclick="setRange(event,'today')">Oggi</button>
+                <button class="range-btn" onclick="setRange(event,'week')">7 Giorni</button>
+                <button class="range-btn" onclick="setRange(event,'month')">30 Giorni</button>
+            </div>
+
+            <!-- Canvas Touch Wrap a Larghezza Intera -->
+            <div id="chart-main-wrap" class="chart-touch-wrap">
+                <canvas id="chart-main"></canvas>
+            </div>
+
+            <!-- Footer Card con Hint a Sinistra e Tasto Schermo Intero in Basso a Destra (nascosto in fullscreen) -->
+            <div class="chart-card-footer mt-2.5 pt-2 border-t border-white/5">
+                <div class="zoom-hint text-[10px] text-gray-500" id="zoom-hint">Pizzica con 2 dita per zoomare • Trascina per scorrere</div>
+                <button onclick="openChartLandscape('chart-card-main', chartMain)" class="fs-corner-btn" title="Apri a tutto schermo in orizzontale">
+                    <svg class="w-3.5 h-3.5 text-[#6ab31d]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+                    <span>Schermo Intero ⛶</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- GRAFICO SECONDARIO: TENSIONE E CORRENTE -->
+        <div id="chart-card-vc" class="lox-card p-3 sm:p-5 relative">
+            <div class="chart-header-row">
+                <span class="text-xs font-bold uppercase tracking-wider text-gray-300">Tensione &amp; Corrente</span>
+                <div id="loading-vc" class="spinner" style="display:none"></div>
+            </div>
+            <div id="chart-vc-wrap" class="chart-touch-wrap">
+                <canvas id="chart-vc"></canvas>
+            </div>
+
+            <!-- Footer Card con Hint a Sinistra e Tasto Schermo Intero in Basso a Destra (nascosto in fullscreen) -->
+            <div class="chart-card-footer mt-2.5 pt-2 border-t border-white/5">
+                <div class="zoom-hint text-[10px] text-gray-500">Pizzica con 2 dita per zoomare • Trascina per scorrere</div>
+                <button onclick="openChartLandscape('chart-card-vc', chartVc)" class="fs-corner-btn" title="Apri a tutto schermo in orizzontale">
+                    <svg class="w-3.5 h-3.5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+                    <span>Schermo Intero ⛶</span>
+                </button>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script>
+const API = '/cgi-bin/power_data.py';
+const urlParams = new URLSearchParams(window.location.search);
+const rawDevice = urlParams.get('device') || 'PowerMeterHome.shelly';
+const isGarage = rawDevice.toLowerCase().includes('box');
+const DEVICE = isGarage ? 'PowerMeterBox.shelly' : 'PowerMeterHome.shelly';
+const OVERLOAD_W = isGarage ? 2500 : 2900;
+
+function switchDevice(dev) {
+    window.location.href = `/power_monitor/?device=${dev}`;
+}
+
+function updateDeviceUI() {
+    const areaEl = document.getElementById('header-area-name');
+    const subEl = document.getElementById('header-device-sub');
+    const btnHome = document.getElementById('btn-device-home');
+    const btnBox = document.getElementById('btn-device-box');
+
+    if (isGarage) {
+        document.title = 'Shelly Box — Monitor Consumi Garage';
+        if (areaEl) areaEl.textContent = 'Garage';
+        if (subEl) subEl.textContent = 'Shelly Box — Rete Elettrica Garage';
+        if (btnBox) {
+            btnBox.className = 'px-3 py-1 text-[11px] font-bold rounded-md bg-[#6ab31d]/20 text-[#6ab31d] border border-[#6ab31d]/40 shadow-sm';
+        }
+        if (btnHome) {
+            btnHome.className = 'px-3 py-1 text-[11px] font-medium rounded-md text-gray-400 hover:text-white transition-colors';
+        }
+    } else {
+        document.title = 'Shelly EM — Monitor Consumi Rete Casa';
+        if (areaEl) areaEl.textContent = 'Casa';
+        if (subEl) subEl.textContent = 'Shelly EM — Rete Elettrica Casa';
+        if (btnHome) {
+            btnHome.className = 'px-3 py-1 text-[11px] font-bold rounded-md bg-[#6ab31d]/20 text-[#6ab31d] border border-[#6ab31d]/40 shadow-sm';
+        }
+        if (btnBox) {
+            btnBox.className = 'px-3 py-1 text-[11px] font-medium rounded-md text-gray-400 hover:text-white transition-colors';
+        }
+    }
+}
+
+let currentRange = '24h';
+let currentTab   = 'line';
+let chartMain = null;
+let chartVc   = null;
+let liveTimer = null;
+
+// ---- Helper mobile e dimensioni ----
+const isMobile = () => window.innerWidth < 640;
+function chartH(desktop, mobile) { return isMobile() ? mobile : desktop; }
+function setCanvasH(id, h) {
+    const wrap = document.getElementById(id + '-wrap');
+    if (wrap) wrap.style.height = h + 'px';
+}
+function updateZoomHint() {
+    const el = document.getElementById('zoom-hint');
+    if (!el) return;
+    el.textContent = isMobile()
+        ? '📱 Pizzica con 2 dita per zoomare • Trascina per scorrere • Tasto "Reset Zoom" per ripristinare'
+        : 'Rotella del mouse = zoom • Trascina = pan • Tasto "Reset Zoom" per ripristinare';
+}
+
+// ----- Palette Colori Loxone Dark -----
+const C_GREEN  = '#6ab31d';
+const C_AMBER  = '#f59e0b';
+const C_EMERALD= '#10b981';
+const C_PURPLE = '#a855f7';
+const C_RED    = '#ef4444';
+
+// Chart.js Defaults
+Chart.defaults.color           = '#6b7280';
+Chart.defaults.borderColor     = '#222222';
+Chart.defaults.font.family     = "'Inter', sans-serif";
+
+function rangeToParams(r) {
+    if (r === '1h')   return 'mode=history&hours=1';
+    if (r === '6h')   return 'mode=history&hours=6';
+    if (r === '24h')  return 'mode=history&hours=24';
+    if (r === 'today')return 'mode=history&range=today';
+    if (r === 'week') return 'mode=history&range=week';
+    if (r === 'month')return 'mode=history&range=month';
+    return 'mode=history&hours=24';
+}
+function rangeToHourlyParams(r) {
+    if (r === '1h')   return 'mode=hourly&hours=1';
+    if (r === '6h')   return 'mode=hourly&hours=6';
+    if (r === '24h')  return 'mode=hourly&hours=24';
+    if (r === 'today')return 'mode=hourly&range=today';
+    if (r === 'week') return 'mode=hourly&range=week';
+    if (r === 'month')return 'mode=hourly&range=month';
+    return 'mode=hourly&hours=24';
+}
+function rangeToDailyParams(r) {
+    if (r === 'week') return 'mode=daily&range=week';
+    if (r === 'month')return 'mode=daily&range=month';
+    return 'mode=daily&range=month';
+}
+function rangeToStatsParams(r) {
+    if (r === '1h')   return 'mode=stats&hours=1';
+    if (r === '6h')   return 'mode=stats&hours=6';
+    if (r === '24h')  return 'mode=stats&hours=24';
+    if (r === 'today')return 'mode=stats&range=today';
+    if (r === 'week') return 'mode=stats&range=week';
+    if (r === 'month')return 'mode=stats&range=month';
+    return 'mode=stats&hours=24';
+}
+
+async function fetchJSON(params) {
+    const r = await fetch(`${API}?device=${DEVICE}&${params}`);
+    return r.json();
+}
+
+function fmtTs(ts) {
+    if (!ts) return '';
+    const d = new Date(ts.replace(' ','T'));
+    const hm = d.toLocaleTimeString('it-IT',{hour:'2-digit',minute:'2-digit'});
+    const dm = d.toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit'});
+    return (currentRange === 'week' || currentRange === 'month') ? dm : hm;
+}
+
+// Configurazione comune per Zoom e Pan (Touch + Mouse)
+function getZoomOptions() {
+    return {
+        zoom: {
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            mode: 'x',
+        },
+        pan: {
+            enabled: true,
+            mode: 'x',
+            threshold: 10
+        },
+        limits: {
+            x: { min: 'original', max: 'original' }
+        }
+    };
+}
+
+// ---- Crea / aggiorna grafico principale (linee potenza in Verde Loxone) ----
+function buildLineChart(data) {
+    const canvas = document.getElementById('chart-main');
+    const ctx = canvas.getContext('2d');
+    const labels = data.timestamps.map(fmtTs);
+    const pw     = data.power_w;
+
+    if (chartMain) chartMain.destroy();
+
+    // Sfumatura gradiente verde Loxone
+    const gradient = ctx.createLinearGradient(0, 0, 0, 260);
+    gradient.addColorStop(0, 'rgba(106, 179, 29, 0.3)');
+    gradient.addColorStop(1, 'rgba(106, 179, 29, 0.0)');
+
+    const datasets = [{
+        label: 'Potenza (W)',
+        data:  pw,
+        borderColor: C_GREEN,
+        backgroundColor: gradient,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 0,
+        borderWidth: 2,
+        yAxisID: 'y'
+    }];
+
+    chartMain = new Chart(canvas, {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            animation: { duration: 350 },
+            layout: {
+                padding: { left: 0, right: isMobile() ? 2 : 8, top: 6, bottom: 0 }
+            },
+            plugins: {
+                legend: {
+                    labels: { color: '#9ca3af', font: { size: 11, weight: 600 }, boxWidth: 12 }
+                },
+                tooltip: {
+                    backgroundColor: '#141414',
+                    borderColor: '#2a2a2a',
+                    borderWidth: 1,
+                    titleColor: '#9ca3af',
+                    bodyColor: '#ffffff',
+                    padding: 10,
+                    callbacks: {
+                        label: ctx => `Potenza: ${ctx.parsed.y?.toFixed(1) ?? '—'} W`
+                    }
+                },
+                zoom: getZoomOptions()
+            },
+            scales: {
+                x: {
+                    offset: false,
+                    ticks: { color: '#6b7280', maxTicksLimit: isMobile() ? 6 : 10, maxRotation: 0, font: { size: 10 } },
+                    grid:  { color: '#1f1f1f' }
+                },
+                y: {
+                    type: 'linear',
+                    position: 'left',
+                    title: { display: !isMobile(), text: 'Watt (W)', color: C_GREEN, font: { size: 10, weight: 600 } },
+                    ticks: {
+                        color: C_GREEN,
+                        font: { size: 10 },
+                        mirror: isMobile(),
+                        padding: isMobile() ? -24 : 4
+                    },
+                    grid:  { color: 'rgba(106, 179, 29, 0.07)' }
+                }
+            }
+        }
+    });
+
+    // Aggiorna grafico V/A separato
+    buildVcChart(data.timestamps.map(fmtTs), data.voltage, data.current);
+}
+
+// ---- Bar chart per ore ----
+function buildHourlyChart(data) {
+    const labels = data.data.map(d => {
+        const ts = d.ts || '';
+        return ts.length >= 16 ? ts.substring(11,16) : ts;
+    });
+    const pw = data.data.map(d => d.avg_w);
+    const mx = data.data.map(d => d.max_w);
+
+    if (chartMain) chartMain.destroy();
+
+    chartMain = new Chart(document.getElementById('chart-main'), {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: 'Media W',
+                    data: pw,
+                    backgroundColor: 'rgba(106, 179, 29, 0.25)',
+                    borderColor: C_GREEN,
+                    borderWidth: 1.5,
+                    borderRadius: 4
+                },
+                {
+                    label: 'Max W',
+                    data: mx,
+                    backgroundColor: 'transparent',
+                    borderColor: C_AMBER,
+                    borderWidth: 1.5,
+                    type: 'line',
+                    tension: 0.3,
+                    pointRadius: 2.5,
+                    yAxisID: 'y'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 350 },
+            layout: {
+                padding: { left: 0, right: isMobile() ? 2 : 8, top: 6, bottom: 0 }
+            },
+            plugins: {
+                legend: { labels: { color: '#9ca3af', font: { size: 11, weight: 600 }, boxWidth: 12 } },
+                tooltip: {
+                    backgroundColor: '#141414', borderColor: '#2a2a2a', borderWidth: 1,
+                    titleColor: '#9ca3af', bodyColor: '#ffffff'
+                },
+                zoom: getZoomOptions()
+            },
+            scales: {
+                x: { ticks: { color: '#6b7280', font: { size: 10 }, maxRotation: 45 }, grid: { color: '#1f1f1f' } },
+                y: {
+                    ticks: {
+                        color: C_GREEN,
+                        font: { size: 10 },
+                        mirror: isMobile(),
+                        padding: isMobile() ? -24 : 4
+                    },
+                    grid: { color: 'rgba(106, 179, 29, 0.07)' },
+                    title: { display: !isMobile(), text: 'Watt (W)', color: C_GREEN, font: { size: 10, weight: 600 } }
+                }
+            }
+        }
+    });
+}
+
+// ---- Bar chart giornaliero ----
+function buildDailyChart(data) {
+    const labels = data.data.map(d => d.ts);
+    const kwh    = data.data.map(d => d.est_kwh);
+    const maxw   = data.data.map(d => d.max_w);
+
+    if (chartMain) chartMain.destroy();
+
+    chartMain = new Chart(document.getElementById('chart-main'), {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: 'kWh Stimati',
+                    data: kwh,
+                    backgroundColor: 'rgba(168, 85, 247, 0.25)',
+                    borderColor: C_PURPLE,
+                    borderWidth: 1.5,
+                    borderRadius: 4,
+                    yAxisID: 'y_kwh'
+                },
+                {
+                    label: 'Picco Max W',
+                    data: maxw,
+                    backgroundColor: 'transparent',
+                    borderColor: C_RED,
+                    borderWidth: 1.5,
+                    type: 'line',
+                    tension: 0.3,
+                    pointRadius: 3,
+                    yAxisID: 'y_w'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 350 },
+            layout: {
+                padding: { left: 0, right: isMobile() ? 2 : 8, top: 6, bottom: 0 }
+            },
+            plugins: {
+                legend: { labels: { color: '#9ca3af', font: { size: 11, weight: 600 }, boxWidth: 12 } },
+                tooltip: {
+                    backgroundColor: '#141414', borderColor: '#2a2a2a', borderWidth: 1,
+                    titleColor: '#9ca3af', bodyColor: '#ffffff',
+                    callbacks: {
+                        afterLabel: ctx => {
+                            const d = data.data[ctx.dataIndex];
+                            return d ? `Costo stimato: €${d.est_cost}` : '';
+                        }
+                    }
+                },
+                zoom: getZoomOptions()
+            },
+            scales: {
+                x: { ticks: { color: '#6b7280', font: { size: 10 } }, grid: { color: '#1f1f1f' } },
+                y_kwh: {
+                    position: 'left',
+                    ticks: {
+                        color: C_PURPLE,
+                        font: { size: 10 },
+                        mirror: isMobile(),
+                        padding: isMobile() ? -24 : 4
+                    },
+                    grid: { color: 'rgba(168, 85, 247, 0.07)' },
+                    title: { display: !isMobile(), text: 'kWh', color: C_PURPLE, font: { size: 10, weight: 600 } }
+                },
+                y_w: {
+                    position: 'right',
+                    ticks: {
+                        color: C_RED,
+                        font: { size: 10 },
+                        mirror: isMobile(),
+                        padding: isMobile() ? -24 : 4
+                    },
+                    grid: { display: false },
+                    title: { display: !isMobile(), text: 'Max W', color: C_RED, font: { size: 10, weight: 600 } }
+                }
+            }
+        }
+    });
+}
+
+// ---- Grafico Tensione & Corrente ----
+function buildVcChart(labels, voltages, currents) {
+    if (chartVc) chartVc.destroy();
+
+    const datasets = [];
+    if (voltages && voltages.some(v => v !== null)) {
+        datasets.push({
+            label: 'Tensione (V)',
+            data: voltages,
+            borderColor: C_AMBER,
+            backgroundColor: 'rgba(245, 158, 11, 0.08)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 0,
+            borderWidth: 1.5,
+            yAxisID: 'y_v'
+        });
+    }
+    if (currents && currents.some(v => v !== null)) {
+        datasets.push({
+            label: 'Corrente (A)',
+            data: currents,
+            borderColor: C_EMERALD,
+            backgroundColor: 'rgba(16, 185, 129, 0.08)',
+            fill: true,
+            tension: 0.3,
+            pointRadius: 0,
+            borderWidth: 1.5,
+            yAxisID: 'y_a'
+        });
+    }
+    if (!datasets.length) {
+        document.getElementById('loading-vc').style.display = 'none';
+        return;
+    }
+
+    const scales = {
+        x: {
+            offset: false,
+            ticks: { color: '#6b7280', maxTicksLimit: isMobile() ? 6 : 10, font: { size: 10 } },
+            grid: { color: '#1f1f1f' }
+        }
+    };
+    if (voltages && voltages.some(v => v !== null)) {
+        const vv = voltages.filter(v => v !== null);
+        scales.y_v = {
+            position: 'left',
+            title: { display: !isMobile(), text: 'Volt (V)', color: C_AMBER, font: { size: 10, weight: 600 } },
+            ticks: {
+                color: C_AMBER,
+                font: { size: 10 },
+                mirror: isMobile(),
+                padding: isMobile() ? -24 : 4
+            },
+            grid: { color: 'rgba(245, 158, 11, 0.07)' },
+            min: Math.floor(Math.min(...vv)) - 2,
+            max: Math.ceil(Math.max(...vv)) + 2
+        };
+    }
+    if (currents && currents.some(v => v !== null)) {
+        const ca = currents.filter(v => v !== null);
+        scales.y_a = {
+            position: 'right',
+            title: { display: !isMobile(), text: 'Ampere (A)', color: C_EMERALD, font: { size: 10, weight: 600 } },
+            ticks: {
+                color: C_EMERALD,
+                font: { size: 10 },
+                mirror: isMobile(),
+                padding: isMobile() ? -24 : 4
+            },
+            grid: { display: false },
+            min: 0,
+            max: Math.ceil(Math.max(...ca)) + 1
+        };
+    }
+
+    chartVc = new Chart(document.getElementById('chart-vc'), {
+        type: 'line',
+        data: { labels, datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: { duration: 300 },
+            interaction: { mode: 'index', intersect: false },
+            layout: {
+                padding: { left: 0, right: isMobile() ? 2 : 8, top: 6, bottom: 0 }
+            },
+            plugins: {
+                legend: { labels: { color: '#9ca3af', font: { size: 11, weight: 600 }, boxWidth: 12 } },
+                tooltip: {
+                    backgroundColor: '#141414',
+                    borderColor: '#2a2a2a',
+                    borderWidth: 1,
+                    titleColor: '#9ca3af',
+                    bodyColor: '#ffffff'
+                },
+                zoom: getZoomOptions()
+            },
+            scales
+        }
+    });
+}
+
+// ---- Live polling ----
+async function fetchLive() {
+    try {
+        const d = await fetchJSON('mode=live');
+        if (d.error) return;
+
+        const pow = d.power_w ?? 0;
+        document.getElementById('live-pow').innerHTML  = `${Math.round(pow)}<span class="val-unit">W</span>`;
+        document.getElementById('live-v').innerHTML    = `${(d.voltage??0).toFixed(1)}<span class="val-unit">V</span>`;
+        document.getElementById('live-a').innerHTML    = `${(d.current??0).toFixed(2)}<span class="val-unit">A</span>`;
+        document.getElementById('live-kwh').innerHTML  = `${(d.energy_kwh??0).toFixed(3)}<span class="val-unit">kWh</span>`;
+        document.getElementById('live-time').textContent = d.timestamp ? d.timestamp.substring(11,16) : '—';
+
+        // Overload alert
+        const alert = document.getElementById('alert-overload');
+        if (pow > OVERLOAD_W) {
+            document.getElementById('alert-msg').textContent = `Assorbimento elevato: ${pow.toFixed(0)} W (soglia distacco: ${OVERLOAD_W} W). Rischio scatto contatore!`;
+            alert.classList.add('show');
+        } else {
+            alert.classList.remove('show');
+        }
+
+        // Colore live badge in base al carico
+        const dot = document.getElementById('live-dot-el');
+        if (pow > OVERLOAD_W) dot.style.background = C_RED;
+        else if (pow > OVERLOAD_W * 0.7) dot.style.background = C_AMBER;
+        else dot.style.background = C_GREEN;
+
+    } catch(e) {}
+}
+
+// ---- Stats ----
+async function fetchStats() {
+    try {
+        const d = await fetchJSON(rangeToStatsParams(currentRange));
+        if (d.error) return;
+        document.getElementById('stat-min-w').textContent = d.power?.min != null ? Math.round(d.power.min) + ' W' : '—';
+        document.getElementById('stat-max-w').textContent = d.power?.max != null ? Math.round(d.power.max) + ' W' : '—';
+        document.getElementById('stat-avg-w').textContent = d.power?.avg != null ? Math.round(d.power.avg) + ' W' : '—';
+        document.getElementById('stat-min-v').textContent = d.voltage?.min != null ? d.voltage.min.toFixed(1) + ' V' : '—';
+        document.getElementById('stat-max-v').textContent = d.voltage?.max != null ? d.voltage.max.toFixed(1) + ' V' : '—';
+        document.getElementById('stat-avg-v').textContent = d.voltage?.avg != null ? d.voltage.avg.toFixed(1) + ' V' : '—';
+        document.getElementById('stat-min-a').textContent = d.current?.min != null ? d.current.min.toFixed(2) + ' A' : '—';
+        document.getElementById('stat-max-a').textContent = d.current?.max != null ? d.current.max.toFixed(2) + ' A' : '—';
+        document.getElementById('stat-avg-a').textContent = d.current?.avg != null ? d.current.avg.toFixed(2) + ' A' : '—';
+        document.getElementById('stat-cost').textContent  = d.estimated_cost_eur != null ? '€' + d.estimated_cost_eur : '—';
+        document.getElementById('stat-period').textContent= d.period_hours != null ? d.period_hours + 'h' : '—';
+        if (d.energy_kwh != null) {
+            document.getElementById('live-kwh').innerHTML = `${d.energy_kwh.toFixed(3)}<span class="val-unit">kWh</span>`;
+        }
+    } catch(e) {}
+}
+
+// ---- Main chart loader ----
+async function loadMainChart() {
+    const loader = document.getElementById('loading-main');
+    loader.style.display = 'block';
+    try {
+        if (currentTab === 'line') {
+            const d = await fetchJSON(rangeToParams(currentRange));
+            if (!d.error && d.timestamps?.length) buildLineChart(d);
+        } else if (currentTab === 'bar') {
+            const d = await fetchJSON(rangeToHourlyParams(currentRange));
+            if (!d.error && d.data?.length) { buildHourlyChart(d); if (chartVc) { chartVc.destroy(); chartVc = null; } }
+        } else if (currentTab === 'daily') {
+            const d = await fetchJSON(rangeToDailyParams(currentRange));
+            if (!d.error && d.data?.length) { buildDailyChart(d); if (chartVc) { chartVc.destroy(); chartVc = null; } }
+        }
+    } catch(e) { console.error(e); }
+    loader.style.display = 'none';
+}
+
+function setRange(ev, r) {
+    currentRange = r;
+    document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+    if (ev && ev.target) ev.target.classList.add('active');
+    refreshAll();
+}
+
+function switchTab(t) {
+    currentTab = t;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('tab-' + t).classList.add('active');
+    loadMainChart();
+}
+
+function resetZoom() {
+    if (chartMain) chartMain.resetZoom();
+    if (chartVc)   chartVc.resetZoom();
+}
+
+let currentFsCardId = null;
+let currentFsChart = null;
+
+async function openChartLandscape(cardId, chartInstance) {
+    const card = document.getElementById(cardId);
+    if (!card) return;
+
+    currentFsCardId = cardId;
+    currentFsChart = chartInstance;
+
+    // Attiva classe fullscreen
+    card.classList.add('chart-fullscreen-mode');
+    document.body.style.overflow = 'hidden';
+
+    // Aggiungi o mostra bottone di uscita
+    let closeBtn = card.querySelector('.fs-close-btn');
+    if (!closeBtn) {
+        closeBtn = document.createElement('button');
+        closeBtn.className = 'fs-close-btn';
+        closeBtn.innerHTML = `✕ Esci`;
+        closeBtn.onclick = (e) => { e.stopPropagation(); closeChartLandscape(); };
+        card.appendChild(closeBtn);
+    }
+    closeBtn.style.display = 'inline-flex';
+
+    // Prova API fullscreen del browser per consentire il lock orizzontale
+    try {
+        if (card.requestFullscreen) {
+            await card.requestFullscreen();
+        } else if (card.webkitRequestFullscreen) {
+            await card.webkitRequestFullscreen();
+        }
+    } catch(e) {}
+
+    // Blocca l'orientamento orizzontale / landscape su dispositivi supportati
+    try {
+        if (screen.orientation && screen.orientation.lock) {
+            await screen.orientation.lock('landscape');
+        }
+    } catch(e) {}
+
+    // Ricalcola altezza canvas massimizzata (senza zoom hint o footer)
+    updateFsCanvasHeight();
+}
+
+function updateFsCanvasHeight() {
+    if (!currentFsCardId) return;
+    const card = document.getElementById(currentFsCardId);
+    if (!card) return;
+
+    setTimeout(() => {
+        const isMain = currentFsCardId === 'chart-card-main';
+        const canvasId = isMain ? 'chart-main' : 'chart-vc';
+        const chartInst = isMain ? chartMain : chartVc;
+        const headerEl = card.querySelector('.chart-header-row');
+        const rangeEl = card.querySelector('.range-row');
+        
+        const cardH = window.innerHeight || document.documentElement.clientHeight;
+        const headerH = headerEl ? headerEl.offsetHeight : 0;
+        const rangeH = rangeEl ? rangeEl.offsetHeight : 0;
+        
+        // Sfrutta tutto lo spazio verticale: nessuna indicazione zoom o footer presente in fullscreen
+        const availH = Math.max(220, cardH - headerH - rangeH - 12);
+        setCanvasH(canvasId, availH);
+        if (chartInst) chartInst.resize();
+    }, 120);
+}
+
+function closeChartLandscape() {
+    if (!currentFsCardId) return;
+    const card = document.getElementById(currentFsCardId);
+    if (card) {
+        card.classList.remove('chart-fullscreen-mode');
+        const closeBtn = card.querySelector('.fs-close-btn');
+        if (closeBtn) closeBtn.style.display = 'none';
+    }
+    document.body.style.overflow = '';
+
+    // Sblocca orientamento
+    try {
+        if (screen.orientation && screen.orientation.unlock) {
+            screen.orientation.unlock();
+        }
+    } catch(e) {}
+
+    // Esci da fullscreen browser
+    try {
+        if (document.fullscreenElement || document.webkitFullscreenElement) {
+            if (document.exitFullscreen) document.exitFullscreen();
+            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        }
+    } catch(e) {}
+
+    setTimeout(() => {
+        setCanvasH('chart-main', chartH(320, 230));
+        setCanvasH('chart-vc', chartH(200, 160));
+        if (chartMain) chartMain.resize();
+        if (chartVc) chartVc.resize();
+        currentFsCardId = null;
+        currentFsChart = null;
+    }, 150);
+}
+
+// Gestione uscita da fullscreen tramite tasto ESC o gesture di sistema
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && currentFsCardId) {
+        closeChartLandscape();
+    }
+});
+document.addEventListener('webkitfullscreenchange', () => {
+    if (!document.webkitFullscreenElement && currentFsCardId) {
+        closeChartLandscape();
+    }
+});
+
+async function refreshAll() {
+    await Promise.all([fetchLive(), fetchStats(), loadMainChart()]);
+}
+
+// ---- Init ----
+document.addEventListener('DOMContentLoaded', () => {
+    updateDeviceUI();
+    updateZoomHint();
+    setCanvasH('chart-main', chartH(320, 230));
+    setCanvasH('chart-vc', chartH(200, 160));
+    refreshAll();
+    liveTimer = setInterval(() => { fetchLive(); }, 30000);
+    setInterval(() => { refreshAll(); }, 300000);
+    window.addEventListener('resize', () => {
+        if (currentFsCardId) {
+            updateFsCanvasHeight();
+        } else {
+            updateZoomHint();
+            setCanvasH('chart-main', chartH(320, 230));
+            setCanvasH('chart-vc', chartH(200, 160));
+        }
+    });
+    window.addEventListener('orientationchange', () => {
+        if (currentFsCardId) {
+            setTimeout(updateFsCanvasHeight, 200);
+        }
+    });
+});
+</script>
+</body>
+</html>

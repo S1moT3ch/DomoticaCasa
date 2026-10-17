@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Hub R7000</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <style>
+        /* Stato PRONTO (Celeste/Cyan) */
+        .ready-mode { border-color: #06b6d4 !important; background-color: rgba(30, 41, 59, 0.9) !important; box-shadow: 0 0 20px rgba(6, 182, 212, 0.4); }
+        /* Stato ATTIVATO (Blu) */
+        .active-btn { border-color: #3b82f6 !important; background-color: rgba(30, 41, 59, 0.9) !important; box-shadow: 0 0 20px rgba(59, 130, 246, 0.4); }
+        /* Stato BLOCCATO (Rosso) */
+        .locked-mode { border-color: #ef4444 !important; background-color: rgba(69, 10, 10, 0.6) !important; box-shadow: 0 0 20px rgba(239, 68, 68, 0.2); }
+        
+        .btn-press { transform: scale(0.95); transition: transform 0.1s; }
+        body { -webkit-tap-highlight-color: transparent; }
+        button { transition: all 0.3s ease; touch-action: manipulation; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans select-none p-4">
+
+    <header class="max-w-xl mx-auto mb-8 flex justify-between items-center bg-slate-900/50 p-6 rounded-3xl border border-slate-800">
+        <h1 class="text-xl font-black tracking-tighter uppercase">Garage <span class="text-blue-500">Node</span></h1>
+        <div id="status-badge" class="flex items-center gap-2 text-[10px] font-bold text-red-500 uppercase">
+            <span id="status-dot" class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+            <span id="status-text">Offline</span>
+        </div>
+    </header>
+
+    <main class="max-w-xl mx-auto grid grid-cols-2 gap-6">
+        <!-- Pulsante Garage 1 -->
+        <button onclick="publish('garage/comando/1', 'OPEN')" id="btn-ch-1" class="flex flex-col items-center justify-center p-10 bg-slate-900 rounded-[3rem] border-2 border-slate-800 active:btn-press aspect-square">
+            <div id="icon-wrap-1" class="p-5 bg-slate-800 rounded-2xl mb-4 text-slate-500 border border-slate-700 transition-all">
+                <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path id="path-ch-1" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h8a2 2 0 012 2v10H6V9a2 2 0 012-2zM11 11h2m-2 4h2" />
+                </svg>
+            </div>
+            <span class="font-black text-sm uppercase tracking-widest">Garage 1</span>
+            <span id="label-ch-1" class="text-[10px] font-bold mt-3 tracking-widest uppercase">SYNC...</span>
+        </button>
+
+        <!-- Pulsante Garage 2 -->
+        <button onclick="publish('garage/comando/2', 'OPEN')" id="btn-ch-2" class="flex flex-col items-center justify-center p-10 bg-slate-900 rounded-[3rem] border-2 border-slate-800 active:btn-press aspect-square">
+            <div id="icon-wrap-2" class="p-5 bg-slate-800 rounded-2xl mb-4 text-slate-500 border border-slate-700 transition-all">
+                <svg class="w-12 h-12" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path id="path-ch-2" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h8a2 2 0 012 2v10H6V9a2 2 0 012-2zM11 11h2m-2 4h2" />
+                </svg>
+            </div>
+            <span class="font-black text-sm uppercase tracking-widest">Garage 2</span>
+            <span id="label-ch-2" class="text-[10px] font-bold mt-3 tracking-widest uppercase">SYNC...</span>
+        </button>
+    </main>
+
+    <script>
+        const BROKER_IP = window.location.hostname; 
+        const BROKER_PORT = 9001; 
+        const client = new Paho.MQTT.Client(BROKER_IP, BROKER_PORT, "web_ui_" + Math.random().toString(16).substr(2, 4));
+
+        const ICON_LOCKED = "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z";
+        const ICON_READY = "M8 7h8a2 2 0 012 2v10H6V9a2 2 0 012-2zM11 11h2m-2 4h2";
+
+        // RIPRISTINO FUNZIONE ORIGINALE (quella che funziona per l'invio)
+        function publish(topic, msg) {
+            client.send(topic, msg);
+        }
+
+        function updateStatus(id, payload) {
+            const btn = document.getElementById(`btn-ch-${id}`);
+            const iconWrap = document.getElementById(`icon-wrap-${id}`);
+            const iconPath = document.getElementById(`path-ch-${id}`);
+            const label = document.getElementById(`label-ch-${id}`);
+            
+            const msg = payload.toUpperCase().trim();
+
+            btn.classList.remove('active-btn', 'locked-mode', 'ready-mode');
+            iconWrap.className = "p-5 rounded-2xl mb-4 transition-all border";
+
+            if (msg === "ON") {
+                btn.classList.add('active-btn');
+                iconWrap.classList.add('bg-blue-600', 'text-white', 'border-blue-400');
+                iconPath.setAttribute("d", ICON_READY);
+                label.innerText = "ATTIVATO";
+                label.className = "text-[10px] text-blue-400 font-bold mt-3 tracking-widest uppercase";
+            } 
+            else if (msg === "LOCKED") {
+                btn.classList.add('locked-mode');
+                iconWrap.classList.add('bg-red-900/40', 'text-red-500', 'border-red-500/50');
+                iconPath.setAttribute("d", ICON_LOCKED);
+                label.innerText = "BLOCCATO";
+                label.className = "text-[10px] text-red-500 font-bold mt-3 tracking-widest uppercase";
+            } 
+            else if (msg === "READY" || msg === "OFF") {
+                btn.classList.add('ready-mode');
+                iconWrap.classList.add('bg-cyan-600', 'text-white', 'border-cyan-400');
+                iconPath.setAttribute("d", ICON_READY);
+                label.innerText = "PRONTO";
+                label.className = "text-[10px] text-cyan-400 font-bold mt-3 tracking-widest uppercase";
+            }
+        }
+
+        client.onMessageArrived = (message) => {
+            const topic = message.destinationName;
+            const payload = message.payloadString;
+            const id = topic.split('/').pop();
+            updateStatus(id, payload);
+        };
+
+        client.onConnectionLost = () => {
+            setUIState(false);
+            setTimeout(connect, 3000);
+        };
+
+        function setUIState(isConnected) {
+            const badge = document.getElementById('status-badge');
+            const dot = document.getElementById('status-dot');
+            const text = document.getElementById('status-text');
+            badge.className = `flex items-center gap-2 text-[10px] font-bold uppercase ${isConnected ? 'text-emerald-500' : 'text-red-500'}`;
+            dot.className = `w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-red-500 animate-pulse'}`;
+            text.innerText = isConnected ? "Online" : "Offline";
+        }
+
+        function connect() {
+            client.connect({
+                onSuccess: () => {
+                    setUIState(true);
+                    client.subscribe("garage/stato/1");
+                    client.subscribe("garage/stato/2");
+                }
+            });
+        }
+        connect();
+    </script>
+</body>
+</html>

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>BTicino Loxone-UI V2.7</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+    <style>
+        :root { 
+            --bg: #000; 
+            --card: #1a1a1a; 
+            --orange: #f39200; 
+            --text: #fff; 
+            --btn: #2b2b2b; 
+            --red: #e74c3c;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; padding: 15px; margin: 0; }
+        .container { width: 100%; max-width: 400px; }
+        .card { background: var(--card); border-radius: 16px; padding: 25px; border: 1px solid #333; box-shadow: 0 10px 30px rgba(0,0,0,0.5); transition: border-color 0.3s; }
+        .card.active-manual { border-color: var(--orange); }
+        
+        .header { font-size: 11px; color: #666; font-weight: bold; letter-spacing: 1.5px; margin-bottom: 20px; text-transform: uppercase; }
+        .display { text-align: center; margin: 30px 0; }
+        .target { font-size: 80px; color: var(--orange); font-weight: 200; line-height: 1; }
+        .ambient { font-size: 18px; color: #888; margin-top: 10px; }
+        
+        .controls { display: flex; justify-content: space-around; margin-bottom: 35px; }
+        .btn-round { width: 75px; height: 75px; border-radius: 50%; border: none; background: var(--btn); color: #fff; font-size: 35px; cursor: pointer; transition: 0.1s; }
+        .btn-round:active { transform: scale(0.9); background: #333; }
+        
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .btn-rect { background: var(--btn); border: none; color: #fff; padding: 20px; border-radius: 10px; font-weight: bold; cursor: pointer; text-transform: uppercase; font-size: 12px; transition: 0.2s; }
+        .full { grid-column: span 2; }
+        
+        .btn-orange.active { background: var(--orange); color: #000; }
+        .btn-boost.active { background: var(--red); animation: pulse 1.5s infinite; }
+        
+        .sync-section { margin-top: 30px; border-top: 1px solid #333; padding-top: 20px; }
+        .btn-sync { background: transparent; border: 1px solid #444; color: #888; font-size: 10px; }
+        .btn-sync:active { border-color: var(--orange); color: var(--orange); }
+
+        @keyframes pulse { 
+            0% { box-shadow: 0 0 0 0 rgba(231,76,60,0.4); } 
+            70% { box-shadow: 0 0 0 15px rgba(231,76,60,0); } 
+            100% { box-shadow: 0 0 0 0 rgba(231,76,60,0); } 
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div id="card" class="card">
+        <div class="header">Bticino Smarther2</div>
+        
+        <div class="display">
+            <div class="target"><span id="target-val">--</span>&deg;</div>
+            <div class="ambient">Ambiente: <span id="current-val">--</span>&deg;C</div>
+        </div>
+
+        <div class="controls">
+            <button class="btn-round" onclick="changeTemp(-0.5)">&minus;</button>
+            <button class="btn-round" onclick="changeTemp(0.5)">&plus;</button>
+        </div>
+
+        <div class="grid">
+            <button id="btn-boost" class="btn-rect btn-boost full" onclick="handleBoostTap()">Boost: OFF</button>
+            <button id="btn-mode" class="btn-rect full btn-orange" onclick="toggleMode()">Programma Auto</button>
+        </div>
+
+        <div class="sync-section">
+            <div style="font-size: 10px; color: #444; margin-bottom: 10px; font-weight: bold; letter-spacing: 1px;">AVANZATE</div>
+            <button class="btn-rect full btn-sync" onclick="syncSchedule()">Sincronizza Piano Invernale</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const TOPIC = "Termostato.bticino";
+    const client = mqtt.connect("ws://" + location.hostname + ":9001");
+    
+    let state = { mode: "home", target_temp: 20, current_temp: 20 };
+    let tapCount = 0;
+    let tapTimer = null;
+    let debounceTimer = null;
+
+    client.on('connect', () => {
+        client.subscribe(TOPIC + "/status");
+        client.publish(TOPIC + "/request_update", "1");
+    });
+
+    client.on('message', (t, m) => {
+        try {
+            state = JSON.parse(m.toString());
+            updateUI();
+        } catch(e) { console.error("Errore dati MQTT"); }
+    });
+
+    function updateUI() {
+        // Aggiorna display solo se l'utente non sta interagendo
+        if (!debounceTimer && !tapTimer) {
+            document.getElementById('target-val').innerText = state.target_temp;
+        }
+        document.getElementById('current-val').innerText = typeof state.current_temp === 'number' ? state.current_temp.toFixed(1) : "--";
+        
+        const isMan = state.mode === "manual";
+        const isBoost = state.target_temp >= 30 && isMan;
+
+        document.getElementById('card').classList.toggle('active-manual', isMan);
+        
+        const mBtn = document.getElementById('btn-mode');
+        mBtn.classList.toggle('active', isMan);
+        mBtn.innerText = isMan ? "Modalit&agrave; Manuale" : "Programma Auto";
+        
+        const bBtn = document.getElementById('btn-boost');
+        if (!tapTimer) {
+            bBtn.classList.toggle('active', isBoost);
+            bBtn.innerText = isBoost ? "Boost: Attivo" : "Boost: OFF";
+        }
+    }
+
+    // Gestione Multi-Tap Boost (30, 60, 90 min)
+    function handleBoostTap() {
+        tapCount++;
+        if (tapCount > 3) tapCount = 0;
+        
+        const bBtn = document.getElementById('btn-boost');
+        clearTimeout(tapTimer);
+
+        if (tapCount === 0) {
+            bBtn.innerText = "Boost: OFF";
+            bBtn.classList.remove('active');
+        } else {
+            bBtn.innerText = "Boost: " + (tapCount * 30) + " Min";
+            bBtn.classList.add('active');
+        }
+
+        tapTimer = setTimeout(() => {
+            if (tapCount > 0) {
+                client.publish(TOPIC + "/boost", (tapCount * 30).toString());
+            } else {
+                client.publish(TOPIC + "/mode", "home");
+            }
+            tapCount = 0;
+            tapTimer = null;
+        }, 800);
+    }
+
+    function changeTemp(delta) {
+        state.target_temp = parseFloat((state.target_temp + delta).toFixed(1));
+        document.getElementById('target-val').innerText = state.target_temp;
+        
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+            client.publish(TOPIC + "/temp", state.target_temp.toString());
+            debounceTimer = null;
+        }, 800);
+    }
+
+    function toggleMode() {
+        const newMode = state.mode === "manual" ? "home" : "manual";
+        client.publish(TOPIC + "/mode", newMode);
+    }
+
+    // Sincronizzazione pianificazione completa (SyncHomeSchedule)
+    function syncSchedule() {
+        const winterSchedule = {
+            "name": "Piano Inverno Loxone",
+            "zones": [
+                {"name": "Comfort", "type": 0, "id": 0, "temp": 21},
+                {"name": "Notte", "type": 1, "id": 1, "temp": 18}
+            ],
+            "timetable": [
+                {"m_offset": 0, "zone_id": 1},   // 00:00 Eco
+                {"m_offset": 360, "zone_id": 0}, // 06:00 Comfort
+                {"m_offset": 1320, "zone_id": 1} // 22:00 Eco
+            ]
+        };
+        
+        if (confirm("Inviare la pianificazione invernale completa?")) {
+            client.publish(TOPIC + "/sync_schedule", JSON.stringify(winterSchedule));
+        }
+    }
+</script>
+</body>
+</html>

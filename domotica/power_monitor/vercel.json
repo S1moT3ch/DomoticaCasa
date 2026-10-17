@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "framework": null,
+  "rewrites": [
+    { "source": "/", "destination": "/api/index" }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/check-heartbeat",
+      "schedule": "0 0 * * *"
+    }
+  ]
+}

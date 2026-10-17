@@ -1,0 +1,1238 @@
+<!DOCTYPE html>
+<html lang="it">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Shelly HUB - Professional Control</title>
+
+    <!-- FIX ANTI-FLICKER -->
+    <style>
+        body {
+            visibility: hidden;
+            background-color: #0f0f0f;
+        }
+
+        #login-overlay,
+        #main-content {
+            display: none;
+        }
+    </style>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+
+    <script>
+        function checkAccess() {
+            const hasToken = sessionStorage.getItem('sh_token');
+            const login = document.getElementById('login-overlay');
+            const main = document.getElementById('main-content');
+            if (hasToken) {
+                if (login) login.style.display = 'none';
+                if (main) main.style.display = 'block';
+                initDashboard();
+            } else {
+                if (login) login.style.display = 'flex';
+                if (main) main.style.display = 'none';
+            }
+            document.body.style.visibility = 'visible';
+        }
+        document.addEventListener("DOMContentLoaded", checkAccess);
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+
+        :root {
+            --lox-green: #6ab31d;
+            --lox-bg: #0f0f0f;
+            --lox-card: #1a1a1a;
+            --lox-border: #2a2a2a;
+        }
+
+        body {
+            color: #ffffff;
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            overflow-x: hidden;
+            margin: 0;
+        }
+
+        .lox-card {
+            background-color: var(--lox-card);
+            border: 1px solid var(--lox-border);
+            border-radius: 12px;
+            transition: all 0.4s ease-out;
+        }
+
+        /* LOGIN OVERLAY */
+        #login-overlay {
+            position: fixed;
+            inset: 0;
+            background: var(--lox-bg);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .login-box {
+            width: 100%;
+            max-width: 360px;
+            padding: 2.5rem;
+            text-align: center;
+        }
+
+        .input-wrapper {
+            position: relative;
+            width: 100%;
+            margin: 1.5rem 0;
+        }
+
+        .login-input {
+            width: 100%;
+            background: #000;
+            border: 1px solid var(--lox-border);
+            color: #fff;
+            padding: 1rem 3rem 1rem 1rem;
+            border-radius: 8px;
+            text-align: left;
+            outline: none;
+            transition: border-color 0.3s;
+            font-size: 1rem;
+        }
+
+        .login-input:focus {
+            border-color: var(--lox-green);
+        }
+
+        .toggle-pass {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            cursor: pointer;
+            color: #4b5563;
+            transition: color 0.3s;
+        }
+
+        .toggle-pass:hover {
+            color: var(--lox-green);
+        }
+
+        /* DASHBOARD UTILS */
+        .nav-item {
+            color: #4b5563;
+            transition: 0.3s;
+        }
+
+        .nav-item.active {
+            color: var(--lox-green);
+        }
+
+        .page-content {
+            display: none;
+            width: 100%;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .page-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            transition: 0.3s;
+        }
+
+        .pulse-green {
+            box-shadow: 0 0 0 0 rgba(106, 179, 29, 0.4);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            70% {
+                box-shadow: 0 0 0 6px rgba(106, 179, 29, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(106, 179, 29, 0);
+            }
+        }
+
+        .timer-bar-container {
+            width: 100%;
+            margin-top: 12px;
+            display: none;
+        }
+
+        .timer-bar-fill {
+            height: 100%;
+            background: var(--lox-green);
+            width: 0%;
+            transition: width 1s linear;
+        }
+
+        .timer-text-overlay {
+            font-size: 10px;
+            font-weight: 700;
+            color: #ffffff;
+            background: rgba(106, 179, 29, 0.2);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+
+        .camera-dropdown {
+            max-height: 0;
+            overflow: hidden;
+            transition: all 0.5s ease-in-out;
+            opacity: 0;
+        }
+
+        .camera-dropdown.open {
+            max-height: 500px;
+            margin-top: 12px;
+            opacity: 1;
+            border: 1px solid var(--lox-border);
+            border-radius: 12px;
+            background: #000;
+        }
+
+        #ctrl-camera-casa {
+            display: none;
+        }
+
+        /* ANIMAZIONE FLUSSO ELETTRICO CORRENTE (SHELLY EM CASA E GARAGE) */
+        .electric-track {
+            position: absolute;
+            inset: 0;
+            background: repeating-linear-gradient(
+                90deg,
+                rgba(106, 179, 29, 0.08) 0px,
+                rgba(106, 179, 29, 0.45) 15px,
+                rgba(106, 179, 29, 0.95) 25px,
+                rgba(106, 179, 29, 0.45) 35px,
+                rgba(106, 179, 29, 0.08) 50px
+            );
+            background-size: 50px 100%;
+            animation: flowCurrent 4.5s linear infinite;
+            filter: drop-shadow(0 0 5px rgba(106, 179, 29, 0.7));
+            border-radius: 999px;
+        }
+
+        .electric-track-box {
+            background: repeating-linear-gradient(
+                90deg,
+                rgba(6, 182, 212, 0.08) 0px,
+                rgba(6, 182, 212, 0.45) 15px,
+                rgba(6, 182, 212, 0.95) 25px,
+                rgba(6, 182, 212, 0.45) 35px,
+                rgba(6, 182, 212, 0.08) 50px
+            );
+            filter: drop-shadow(0 0 5px rgba(6, 182, 212, 0.7));
+        }
+
+        .electric-particles {
+            position: absolute;
+            inset: 0;
+            background-image: radial-gradient(circle, #ffffff 1.8px, transparent 1.8px);
+            background-size: 22px 100%;
+            opacity: 0.85;
+            animation: flowCurrent 3.0s linear infinite;
+        }
+
+        @keyframes flowCurrent {
+            0% { background-position: 0 0; }
+            100% { background-position: 100px 0; }
+        }
+    </style>
+</head>
+
+<body class="pb-24">
+
+    <!-- LOGIN -->
+    <div id="login-overlay">
+        <div class="lox-card login-box shadow-2xl">
+            <div class="flex justify-center mb-6">
+                <div class="p-4 bg-[#6ab31d]/10 rounded-full border border-[#6ab31d]/20">
+                    <svg class="w-10 h-10 text-[#6ab31d]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-width="1.5"
+                            d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                </div>
+            </div>
+            <h2 class="text-2xl font-bold text-gray-200 tracking-tight text-center">Accesso Protetto</h2>
+            <p class="text-[10px] text-gray-600 uppercase tracking-[0.2em] font-bold mt-2 text-center">Smart Home Hub
+            </p>
+
+            <div class="input-wrapper">
+                <input type="password" id="pass-field" class="login-input" placeholder="Password">
+                <div class="toggle-pass" onclick="togglePassVisibility()">
+                    <svg id="eye-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path id="eye-open" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path id="eye-base" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                </div>
+            </div>
+
+            <button onclick="performLogin()"
+                class="w-full py-3 bg-[#6ab31d] text-black font-bold rounded-lg uppercase text-xs tracking-widest hover:bg-[#7bc524] transition-colors">Entra</button>
+            <p id="err-msg" class="text-red-500 text-[10px] font-bold mt-4 uppercase hidden text-center">Credenziali
+                Errate</p>
+        </div>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div id="main-content">
+        <header class="w-full max-w-6xl mx-auto p-6 flex justify-between items-center">
+            <div>
+                <h1 id="page-title" class="text-xl font-semibold text-gray-400">Area Casa</h1>
+                <p class="text-[10px] text-gray-600 uppercase tracking-widest font-bold">Loxone Dark Pro</p>
+            </div>
+            <!-- CONTENITORE STATUS + LOGIN SULLA STESSA RIGA -->
+            <div class="flex items-center gap-3">
+                <div id="status-badge"
+                    class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] text-[10px] font-medium whitespace-nowrap">
+                    <span id="ping-solid" class="status-dot bg-red-500"></span>
+                    <span id="status-text" class="text-gray-500 uppercase">Offline</span>
+                </div>
+                <button onclick="logout()"
+                    class="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-red-500/20 text-red-500/60 text-[10px] font-bold uppercase tracking-widest hover:bg-red-500/10 hover:text-red-500 transition-all">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-width="2"
+                            d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                </button>
+            </div>
+        </header>
+
+        <main class="w-full max-w-4xl mx-auto px-4">
+            <!-- PAGINE (CASA/GARAGE) -->
+            <section id="page-casa" class="page-content active">
+
+                <!-- CARD CONSUMI SHELLY EM (RETE CASA) CON FLUSSO CORRENTE -->
+                <div id="card-power-em" class="lox-card p-4 mb-4 cursor-pointer hover:border-[#6ab31d]/60 transition-all group" onclick="window.location.href='/power_monitor/'" title="Clicca per aprire grafici e statistiche energetiche">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2.5">
+                            <div id="em-icon-wrap" class="p-2 rounded-lg bg-[#6ab31d]/10 text-[#6ab31d] group-hover:bg-[#6ab31d]/20 transition-all">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="text-[10px] text-gray-500 font-bold uppercase tracking-widest block">Rete Elettrica Casa</span>
+                                <span class="text-sm font-semibold text-gray-200 group-hover:text-white flex items-center gap-1.5">
+                                    Consumi Live (Shelly EM)
+                                    <svg class="w-3.5 h-3.5 text-gray-500 group-hover:text-[#6ab31d] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span id="em-flow-pill" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#6ab31d]/10 border border-[#6ab31d]/30 text-[9px] font-bold text-[#6ab31d] uppercase tracking-wider">
+                                <span class="w-1.5 h-1.5 rounded-full bg-[#6ab31d] animate-ping inline-block"></span>
+                                <span id="em-flow-status">Flusso Attivo</span>
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- ANIMAZIONE FLUSSO ELETTRICO CORRENTE -->
+                    <div class="relative w-full h-2.5 rounded-full bg-black/60 border border-white/5 overflow-hidden mb-3.5 px-1 flex items-center">
+                        <div id="em-flow-track" class="electric-track"></div>
+                        <div id="em-flow-particles" class="electric-particles"></div>
+                    </div>
+
+                    <!-- VALORI IN TEMPO REALE -->
+                    <div class="grid grid-cols-4 gap-2 bg-black/30 p-2.5 rounded-lg border border-white/5 text-center">
+                        <div>
+                            <span class="text-[8px] text-gray-500 uppercase font-bold tracking-wider block">Potenza</span>
+                            <div class="text-base sm:text-lg font-bold text-[#6ab31d] font-mono leading-tight mt-0.5" id="em-live-power">—<span class="text-[9px] font-normal text-gray-400 ml-0.5">W</span></div>
+                        </div>
+                        <div>
+                            <span class="text-[8px] text-gray-500 uppercase font-bold tracking-wider block">Tensione</span>
+                            <div class="text-base sm:text-lg font-bold text-amber-400 font-mono leading-tight mt-0.5" id="em-live-voltage">—<span class="text-[9px] font-normal text-gray-400 ml-0.5">V</span></div>
+                        </div>
+                        <div>
+                            <span class="text-[8px] text-gray-500 uppercase font-bold tracking-wider block">Corrente</span>
+                            <div class="text-base sm:text-lg font-bold text-emerald-300 font-mono leading-tight mt-0.5" id="em-live-current">—<span class="text-[9px] font-normal text-gray-400 ml-0.5">A</span></div>
+                        </div>
+                        <div>
+                            <span class="text-[8px] text-gray-500 uppercase font-bold tracking-wider block">Oggi</span>
+                            <div class="text-base sm:text-lg font-bold text-purple-300 font-mono leading-tight mt-0.5" id="em-live-energy">—<span class="text-[9px] font-normal text-gray-400 ml-0.5">kWh</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="lox-card p-4 mb-6">
+                    <div id="container-in1"
+                        class="flex justify-between items-center bg-black/20 p-4 rounded-lg border border-white/5 transition-all">
+                        <div class="flex flex-col"><span
+                                class="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Sicurezza</span><span
+                                class="text-sm text-gray-300">Stato Allarme Casa</span></div><span id="io-in1-text"
+                            class="text-xs font-bold text-gray-700 italic px-3 py-1 rounded bg-black/30">SINC...</span>
+                    </div>
+                </div>
+                <div id="controls-casa" class="grid grid-cols-2 gap-4"></div>
+
+                <!-- PANNELLO AUTO-DISCOVERY -->
+                <div id="discovery-panel" class="mt-6" style="display:none">
+                    <div class="lox-card p-4 border border-[#6ab31d]/20 bg-[#6ab31d]/5">
+                        <div class="flex items-center gap-2 mb-3">
+                            <span id="discovery-pulse" class="w-2 h-2 rounded-full bg-[#6ab31d] pulse-green inline-block"></span>
+                            <span class="text-[10px] font-bold uppercase tracking-widest text-[#6ab31d]">Dispositivi Scoperti sul Broker</span>
+                            <span id="discovery-count" class="ml-auto text-[9px] text-gray-600 font-mono">Scansione...</span>
+                        </div>
+                        <div id="discovered-list" class="space-y-2"></div>
+                    </div>
+                </div>
+                <div id="ctrl-camera-casa" class="mt-6"><button onclick="toggleCamera('casa')"
+                        class="w-full py-3 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl text-[10px] font-bold uppercase tracking-widest text-[#6ab31d] flex items-center justify-center gap-2 transition-all"><svg
+                            class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-width="2"
+                                d="M15 10l4.553-2.276A1 1 0 0121 8.618v7.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>Live Camera Soggiorno</button>
+                    <div id="camera-dropdown-casa" class="camera-dropdown"><video id="video-player-casa"
+                            class="w-full h-auto aspect-video rounded-md" autoplay muted playsinline></video></div>
+                </div>
+                <div id="ctrl-camera-corridoio" class="mt-4"><button onclick="toggleCamera('corridoio')"
+                        class="w-full py-3 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl text-[10px] font-bold uppercase tracking-widest text-[#6ab31d] flex items-center justify-center gap-2 transition-all"><svg
+                            class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-width="2"
+                                d="M15 10l4.553-2.276A1 1 0 0121 8.618v7.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>Live Camera Corridoio</button>
+                    <div id="camera-dropdown-corridoio" class="camera-dropdown"><video id="video-player-corridoio"
+                            class="w-full h-auto aspect-video rounded-md" autoplay muted playsinline></video></div>
+                </div>
+            </section>
+
+            <section id="page-garage" class="page-content">
+
+                <!-- CARD CONSUMI SHELLY EM (GARAGE) CON FLUSSO CORRENTE -->
+                <div id="card-power-box" class="lox-card p-4 mb-4 cursor-pointer hover:border-[#06b6d4]/60 transition-all group" onclick="window.location.href='/power_monitor/?device=PowerMeterBox.shelly'" title="Clicca per aprire grafici e statistiche energetiche Garage">
+                    <div class="flex items-center justify-between mb-3">
+                        <div class="flex items-center gap-2.5">
+                            <div id="box-icon-wrap" class="p-2 rounded-lg bg-[#06b6d4]/10 text-[#06b6d4] group-hover:bg-[#06b6d4]/20 transition-all">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                </svg>
+                            </div>
+                            <div>
+                                <span class="text-[10px] text-gray-500 font-bold uppercase tracking-widest block">Rete Elettrica Garage</span>
+                                <span class="text-sm font-semibold text-gray-200 group-hover:text-white flex items-center gap-1.5">
+                                    Consumi Live (Shelly Box)
+                                    <svg class="w-3.5 h-3.5 text-gray-500 group-hover:text-[#06b6d4] transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span id="box-flow-pill" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#06b6d4]/10 border border-[#06b6d4]/30 text-[9px] font-bold text-[#06b6d4] uppercase tracking-wider">
+                                <span class="w-1.5 h-1.5 rounded-full bg-[#06b6d4] animate-ping inline-block"></span>
+                                <span id="box-flow-status">Flusso Attivo</span>
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- ANIMAZIONE FLUSSO ELETTRICO CORRENTE GARAGE -->
+                    <div class="relative w-full h-2.5 rounded-full bg-black/60 border border-white/5 overflow-hidden mb-3.5 px-1 flex items-center">
+                        <div id="box-flow-track" class="electric-track electric-track-box"></div>
+                        <div id="box-flow-particles" class="electric-particles"></div>
+                    </div>
+
+                    <!-- VALORI IN TEMPO REALE -->
+                    <div class="grid grid-cols-4 gap-2 bg-black/30 p-2.5 rounded-lg border border-white/5 text-center">
+                        <div>
+                            <span class="text-[8px] text-gray-500 uppercase font-bold tracking-wider block">Potenza</span>
+                            <div class="text-base sm:text-lg font-bold text-[#06b6d4] font-mono leading-tight mt-0.5" id="box-live-power">—<span class="text-[9px] font-normal text-gray-400 ml-0.5">W</span></div>
+                        </div>
+                        <div>
+                            <span class="text-[8px] text-gray-500 uppercase font-bold tracking-wider block">Tensione</span>
+                            <div class="text-base sm:text-lg font-bold text-amber-400 font-mono leading-tight mt-0.5" id="box-live-voltage">—<span class="text-[9px] font-normal text-gray-400 ml-0.5">V</span></div>
+                        </div>
+                        <div>
+                            <span class="text-[8px] text-gray-500 uppercase font-bold tracking-wider block">Corrente</span>
+                            <div class="text-base sm:text-lg font-bold text-emerald-300 font-mono leading-tight mt-0.5" id="box-live-current">—<span class="text-[9px] font-normal text-gray-400 ml-0.5">A</span></div>
+                        </div>
+                        <div>
+                            <span class="text-[8px] text-gray-500 uppercase font-bold tracking-wider block">Oggi</span>
+                            <div class="text-base sm:text-lg font-bold text-purple-300 font-mono leading-tight mt-0.5" id="box-live-energy">—<span class="text-[9px] font-normal text-gray-400 ml-0.5">kWh</span></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="lox-card p-4 mb-4">
+                    <div id="container-in0"
+                        class="flex justify-between items-center bg-black/20 p-4 rounded-lg border border-white/5 transition-all">
+                        <div class="flex flex-col"><span
+                                class="text-[10px] text-gray-500 font-bold uppercase tracking-widest">Stato
+                                Garage</span><span id="io-in0-label" class="text-sm text-gray-300 italic">Sinc...</span>
+                        </div><span id="io-in0-text"
+                            class="text-[11px] font-bold text-gray-700 italic px-2 py-1 rounded bg-black/30">SINC...</span>
+                    </div>
+                </div>
+                <div id="alarm-btn-card"
+                    class="lox-card p-4 flex flex-col justify-between min-h-[110px] cursor-pointer mb-6"
+                    onclick="toggleDevice('Allarme.shelly')">
+                    <div class="flex justify-between items-start">
+                        <div id="icon-bg-Allarme.shelly"
+                            class="p-2 rounded-lg bg-gray-800/50 text-gray-600 transition-all"><svg class="w-5 h-5"
+                                fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z">
+                                </path>
+                            </svg></div>
+                        <div id="dot-Allarme.shelly" class="status-dot bg-gray-700"></div>
+                    </div>
+                    <div>
+                        <h2 id="alarm-btn-title" class="text-sm font-medium text-gray-300 mb-0.5">Allarme Garage</h2>
+                        <p id="status-val-Allarme.shelly"
+                            class="text-[9px] text-gray-700 uppercase font-bold tracking-widest">Sinc...</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div id="btn-ch-1" onmousedown="visualPress('1', true)" onmouseup="visualPress('1', false)"
+                        onmouseleave="visualPress('1', false)" ontouchstart="visualPress('1', true)"
+                        ontouchend="visualPress('1', false)" onclick="publish('garage/comando/1', 'OPEN')"
+                        class="lox-card p-4 flex flex-col justify-between min-h-[120px] cursor-pointer">
+                        <div class="flex justify-between items-start">
+                            <div id="icon-wrap-1" class="p-2 rounded-lg bg-gray-800/50 text-gray-600 transition-all">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path id="path-ch-1" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M8 7h8a2 2 0 012 2v10H6V9a2 2 0 012-2zM11 11h2m-2 4h2" />
+                                </svg></div>
+                            <div id="dot-ch-1" class="status-dot bg-gray-700"></div>
+                        </div>
+                        <div>
+                            <h2 class="text-sm font-medium text-gray-300 mb-0.5">Serranda</h2>
+                            <p id="label-ch-1" class="text-[9px] text-gray-700 uppercase font-bold tracking-widest">
+                                PRONTO</p>
+                        </div>
+                    </div>
+                    <div id="btn-ch-2" onmousedown="visualPress('2', true)" onmouseup="visualPress('2', false)"
+                        onmouseleave="visualPress('2', false)" ontouchstart="visualPress('2', true)"
+                        ontouchend="visualPress('2', false)" onclick="publish('garage/comando/2', 'OPEN')"
+                        class="lox-card p-4 flex flex-col justify-between min-h-[120px] cursor-pointer">
+                        <div class="flex justify-between items-start">
+                            <div id="icon-wrap-2" class="p-2 rounded-lg bg-gray-800/50 text-gray-600 transition-all">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path id="path-ch-2" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                        d="M8 7h8a2 2 0 012 2v10H6V9a2 2 0 012-2zM11 11h2m-2 4h2" />
+                                </svg></div>
+                            <div id="dot-ch-2" class="status-dot bg-gray-700"></div>
+                        </div>
+                        <div>
+                            <h2 class="text-sm font-medium text-gray-300 mb-0.5">Cancello</h2>
+                            <p id="label-ch-2" class="text-[9px] text-gray-700 uppercase font-bold tracking-widest">
+                                PRONTO</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-4"><button onclick="toggleCamera('garage')"
+                        class="w-full py-3 bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl text-[10px] font-bold uppercase tracking-widest text-gray-400 flex items-center justify-center gap-2 transition-all">Live
+                        Camera Garage</button>
+                    <div id="camera-dropdown-garage" class="camera-dropdown"><video id="video-player-garage"
+                            class="w-full h-auto aspect-video rounded-md" autoplay muted playsinline></video></div>
+                </div>
+                <div class="lox-card p-5 mt-6 border-white/5">
+                    <div id="shutter-card"
+                        class="bg-black/30 rounded-xl p-6 border border-white/5 text-center transition-all duration-500">
+                        <p class="text-[10px] text-gray-500 uppercase font-bold mb-1 tracking-widest">Feedback Serranda
+                        </p>
+                        <div id="shutter-status" class="text-2xl font-bold text-gray-600 uppercase tracking-widest">
+                            Sinc...</div>
+                        <div class="text-[10px] text-gray-600 mt-1 font-mono"><span id="io-volts">0.00</span>V</div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <nav
+            class="fixed bottom-0 left-0 right-0 bg-[#161616] border-t border-[#2a2a2a] px-6 py-3 flex justify-around items-center z-50 shadow-2xl">
+            <button onclick="showPage('casa')" id="nav-casa"
+                class="nav-item active flex flex-col items-center gap-1"><svg class="w-6 h-6" fill="none"
+                    stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-width="2"
+                        d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                </svg><span class="text-[10px] font-bold uppercase">Casa</span></button>
+            <button onclick="showPage('garage')" id="nav-garage" class="nav-item flex flex-col items-center gap-1"><svg
+                    class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-width="2"
+                        d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                </svg><span class="text-[10px] font-bold uppercase">Garage</span></button>
+        </nav>
+    </div>
+
+    <script>
+        const DEVICES_CASA = [
+            { id: "LedAndrea.shelly", name: "Led Andrea" },
+            { id: "Ricircolo.shelly", name: "Ricircolo" },
+            { id: "TapoHome.shelly", name: "Camera Soggiorno" },
+            { id: "LuceCucina.shelly", name: "Luce Cucina" },
+            { id: "AllarmeIO.shelly", name: "Camera Corridoio" }
+        ];
+        const ALARM_ID = "Allarme.shelly", IO_ID = "AllarmeIO.shelly";
+        const POWERMETER_ID = "PowerMeterBOx.shelly";
+        const POWERMETER_BOX_ID = "PowerMeterBox.shelly";
+        const POWERMETER_HOME_ID = "PowerMeterHome.shelly";
+        const ICON_READY = "M8 7h8a2 2 0 012 2v10H6V9a2 2 0 012-2zM11 11h2m-2 4h2", ICON_LOCKED = "M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z";
+
+        // --- KNOWN IDs (non mostrati nella discovery) ---
+        const KNOWN_IDS = new Set([
+            ...DEVICES_CASA.map(d => d.id),
+            ALARM_ID, IO_ID, POWERMETER_ID, POWERMETER_BOX_ID, POWERMETER_HOME_ID
+        ]);
+
+        // --- EXTRA DEVICE (da localStorage) ---
+        let extraDevicesCasa = JSON.parse(localStorage.getItem('sh_extra_devices_casa') || '[]');
+        // Assicura che Led Andrea rimanga fisso e non duplicato in extra
+        extraDevicesCasa = extraDevicesCasa.filter(d => d.id !== "LedAndrea.shelly");
+        localStorage.setItem('sh_extra_devices_casa', JSON.stringify(extraDevicesCasa));
+        let ignoredDevices = new Set(JSON.parse(localStorage.getItem('sh_ignored_devices') || '[]'));
+        ignoredDevices.delete("LedAndrea.shelly");
+        localStorage.setItem('sh_ignored_devices', JSON.stringify([...ignoredDevices]));
+
+        let states = {}, timerInterval = null, hlsCasa = null, hlsCorridoio = null, hlsGarage = null;
+        let discoveredDevices = new Set(); // device trovati dalla discovery live
+        let discoveryTimer = null;
+        const CLIENT_ID = "web_hub_" + Math.random().toString(16).substr(2, 4);
+        let client = new Paho.MQTT.Client(window.location.hostname, 9001, CLIENT_ID);
+
+        // --- CARD FACTORY ---
+        function makeDeviceCard(dev, isExtra = false) {
+            const isLight = dev.id.includes("Led") || dev.id.includes("Luce");
+            const iconSvg = isLight
+                ? `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />`
+                : `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>`;
+
+            const timerHtml = dev.id === "Ricircolo.shelly" ? `<div id="timer-cont-${dev.id}" class="timer-bar-container"><div class="flex justify-between items-center mb-1.5 px-0.5"><span class="text-[7px] text-gray-500 uppercase font-bold">Auto-Off</span><span id="timer-text-${dev.id}" class="timer-text-overlay">00:00</span></div><div class="w-full h-1 bg-white/10 rounded-full overflow-hidden"><div id="timer-fill-${dev.id}" class="timer-bar-fill w-0 h-full"></div></div></div>` : '';
+            const removeBtn = isExtra ? `<button onclick="removeExtraDevice('${dev.id}')" title="Rimuovi dalla dashboard" class="absolute top-2 right-2 w-5 h-5 rounded-full bg-red-500/10 border border-red-500/20 text-red-500/60 text-[10px] flex items-center justify-center hover:bg-red-500/30 hover:text-red-500 transition-all">×</button>` : '';
+            return `<div class="lox-card p-4 flex flex-col justify-between min-h-[140px] cursor-pointer btn-press relative" onclick="toggleDevice('${dev.id}')">${removeBtn}<div class="flex justify-between items-start"><div id="icon-bg-${dev.id}" class="p-2 rounded-lg bg-gray-800/50 text-gray-600 transition-all"><svg class="w-5 h-5" id="icon-${dev.id}" fill="none" stroke="currentColor" viewBox="0 0 24 24">${iconSvg}</svg></div><div id="dot-${dev.id}" class="status-dot bg-gray-700"></div></div><div><h2 class="text-sm font-medium text-gray-300 mb-0.5">${dev.name}</h2><p id="status-val-${dev.id}" class="text-[9px] text-gray-700 uppercase font-bold tracking-widest">Sinc...</p>${timerHtml}</div></div>`;
+        }
+
+        const contCasa = document.getElementById('controls-casa');
+
+        // Carica device base
+        DEVICES_CASA.forEach(dev => {
+            contCasa.innerHTML += makeDeviceCard(dev, false);
+        });
+
+        // Carica extra device salvati in localStorage
+        function renderExtraDevices() {
+            // Rimuovi card extra esistenti
+            document.querySelectorAll('.extra-device-card').forEach(el => el.remove());
+            extraDevicesCasa.forEach(dev => {
+                const wrapper = document.createElement('div');
+                wrapper.className = 'extra-device-card';
+                wrapper.innerHTML = makeDeviceCard(dev, true);
+                contCasa.appendChild(wrapper);
+            });
+        }
+        renderExtraDevices();
+
+        // Abbonati e sincronizza extra device
+        function subscribeAndSyncExtraDevices() {
+            extraDevicesCasa.forEach(dev => {
+                client.subscribe(`${dev.id}/#`);
+                const msg = new Paho.MQTT.Message(JSON.stringify({ id: 1, src: `${dev.id}/rpc`, method: "Switch.GetStatus", params: { id: 0 } }));
+                msg.destinationName = `${dev.id}/rpc`;
+                client.send(msg);
+            });
+            // PowerMeterBOx.shelly nel garage
+            client.subscribe(`${POWERMETER_ID}/#`);
+            const pmMsg = new Paho.MQTT.Message(JSON.stringify({ id: 1, src: `${POWERMETER_ID}/rpc`, method: "Switch.GetStatus", params: { id: 0 } }));
+            pmMsg.destinationName = `${POWERMETER_ID}/rpc`;
+            client.send(pmMsg);
+        }
+
+        // --- DISCOVERY: aggiunge device scoperti non noti ---
+        function updateDiscoveryUI() {
+            const allKnown = new Set([...KNOWN_IDS, ...extraDevicesCasa.map(d => d.id)]);
+            const newDevices = [...discoveredDevices].filter(id => !allKnown.has(id) && !ignoredDevices.has(id));
+            const panel = document.getElementById('discovery-panel');
+            const list = document.getElementById('discovered-list');
+            const count = document.getElementById('discovery-count');
+
+            if (newDevices.length === 0) {
+                panel.style.display = 'none';
+                return;
+            }
+            panel.style.display = 'block';
+            count.textContent = `${newDevices.length} non configurati`;
+            list.innerHTML = '';
+            newDevices.forEach(id => {
+                const inputId = `disc-name-${CSS.escape(id)}`;
+                const row = document.createElement('div');
+                row.id = `disc-row-${id}`;
+                row.className = 'flex items-center gap-2 bg-black/30 rounded-lg p-2 border border-white/5';
+                row.innerHTML = `
+                    <div class="flex-1 min-w-0">
+                        <p class="text-[9px] text-gray-500 uppercase font-bold tracking-widest truncate">${id}</p>
+                        <input id="${inputId}" type="text" placeholder="Nome dispositivo" value="${id.replace('.shelly','').replace(/([A-Z])/g,' $1').trim()}"
+                            class="mt-1 w-full bg-[#111] border border-[#2a2a2a] text-white text-xs px-2 py-1 rounded outline-none focus:border-[#6ab31d]/50 transition-colors"
+                            onclick="event.stopPropagation()">
+                    </div>
+                    <button onclick="addDiscoveredDevice('${id}', '${inputId}')" class="shrink-0 px-2 py-1 bg-[#6ab31d]/10 border border-[#6ab31d]/30 text-[#6ab31d] text-[9px] font-bold uppercase rounded hover:bg-[#6ab31d]/30 transition-all">+ Aggiungi</button>
+                    <button onclick="ignoreDiscoveredDevice('${id}')" class="shrink-0 px-2 py-1 bg-gray-800 border border-gray-700 text-gray-500 text-[9px] font-bold uppercase rounded hover:bg-gray-700 transition-all">Ignora</button>
+                `;
+                list.appendChild(row);
+            });
+        }
+
+        function addDiscoveredDevice(id, inputId) {
+            const nameEl = document.getElementById(inputId);
+            const name = nameEl ? nameEl.value.trim() || id : id;
+            extraDevicesCasa.push({ id, name });
+            localStorage.setItem('sh_extra_devices_casa', JSON.stringify(extraDevicesCasa));
+            KNOWN_IDS.add(id);
+            renderExtraDevices();
+            // Abbonati e sincronizza
+            client.subscribe(`${id}/#`);
+            const msg = new Paho.MQTT.Message(JSON.stringify({ id: 1, src: `${id}/rpc`, method: "Switch.GetStatus", params: { id: 0 } }));
+            msg.destinationName = `${id}/rpc`;
+            client.send(msg);
+            updateDiscoveryUI();
+        }
+
+        function ignoreDiscoveredDevice(id) {
+            ignoredDevices.add(id);
+            localStorage.setItem('sh_ignored_devices', JSON.stringify([...ignoredDevices]));
+            updateDiscoveryUI();
+        }
+
+        function removeExtraDevice(id) {
+            extraDevicesCasa = extraDevicesCasa.filter(d => d.id !== id);
+            localStorage.setItem('sh_extra_devices_casa', JSON.stringify(extraDevicesCasa));
+            KNOWN_IDS.delete(id);
+            discoveredDevices.add(id); // rimette in discovery
+            renderExtraDevices();
+            updateDiscoveryUI();
+        }
+
+        function startDiscovery() {
+            // Ascolta tutti i topic per 15 secondi e raccoglie device *.shelly sconosciuti
+            client.subscribe('#');
+            const countEl = document.getElementById('discovery-count');
+            if (countEl) countEl.textContent = 'Scansione in corso...';
+            if (discoveryTimer) clearTimeout(discoveryTimer);
+            discoveryTimer = setTimeout(() => {
+                // Dopo 15s smette di ascoltare # (ottimizzazione)
+                try { client.unsubscribe('#'); } catch(e) {}
+                const allKnown = new Set([...KNOWN_IDS, ...extraDevicesCasa.map(d => d.id)]);
+                const count = [...discoveredDevices].filter(id => !allKnown.has(id) && !ignoredDevices.has(id)).length;
+                if (countEl) countEl.textContent = count > 0 ? `${count} non configurati` : 'Nessun nuovo device';
+                updateDiscoveryUI();
+            }, 15000);
+        }
+
+        function togglePassVisibility() {
+            const field = document.getElementById('pass-field');
+            const icon = document.getElementById('eye-icon');
+            if (field.type === "password") {
+                field.type = "text";
+                icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878l-3.42-3.42m6.42 6.42l3.42 3.42M21 21l-2-2m-3.879-3.879L3 3" />';
+            } else {
+                field.type = "password";
+                icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />';
+            }
+        }
+
+        async function performLogin() {
+            const pass = document.getElementById('pass-field').value;
+            try {
+                const res = await fetch('cgi-bin/login.py', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `password=${encodeURIComponent(pass)}` });
+                const data = await res.json();
+                if (data.status === "success") { sessionStorage.setItem('sh_token', data.token); checkAccess(); }
+                else { document.getElementById('err-msg').classList.remove('hidden'); }
+            } catch (e) { if (sessionStorage.getItem('sh_token')) checkAccess(); else alert("Errore server CGI"); }
+        }
+
+        function logout() { sessionStorage.removeItem('sh_token'); window.location.reload(); }
+
+        function initDashboard() { if (!client.isConnected()) client.connect({ onSuccess: onConnect, onFailure: () => setTimeout(initDashboard, 5000) }); }
+
+        function onConnect() {
+            updateConnUI(true);
+            [...DEVICES_CASA.map(d => d.id), ALARM_ID].forEach(id => {
+                client.subscribe(`${id}/#`);
+                client.send(new Paho.MQTT.Message(JSON.stringify({ id: 1, src: `${id}/rpc`, method: "Switch.GetStatus", params: { id: 0 } })).tap(m => m.destinationName = `${id}/rpc`));
+            });
+            client.subscribe(`${IO_ID}/#`); client.subscribe("garage/stato/#");
+            // Telemetria Shelly EM Casa
+            client.subscribe(`${POWERMETER_HOME_ID}/#`);
+            client.subscribe(`shellies/${POWERMETER_HOME_ID}/#`);
+            // Telemetria Shelly EM Garage
+            client.subscribe(`${POWERMETER_BOX_ID}/#`);
+            client.subscribe(`${POWERMETER_ID}/#`);
+            client.subscribe(`shellies/${POWERMETER_BOX_ID}/#`);
+            client.subscribe(`shellies/${POWERMETER_ID}/#`);
+            publish("garage/comando/1", "STATUS"); publish("garage/comando/2", "STATUS");
+            client.send(new Paho.MQTT.Message(JSON.stringify({ id: 1, src: `${IO_ID}/rpc`, method: "Shelly.GetStatus" })).tap(m => m.destinationName = `${IO_ID}/rpc`));
+            // Abbona extra device da localStorage
+            subscribeAndSyncExtraDevices();
+            // Avvia discovery automatica per nuovi device
+            startDiscovery();
+            // Carica subito telemetria live Shelly EM
+            fetchLivePower();
+        }
+
+        Paho.MQTT.Message.prototype.tap = function (fn) { fn(this); return this; };
+
+        function showPage(page) {
+            document.querySelectorAll('.page-content').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            document.getElementById('page-' + page).classList.add('active');
+            document.getElementById('nav-' + page).classList.add('active');
+            document.getElementById('page-title').innerText = page === 'casa' ? 'Area Casa' : 'Area Garage';
+        }
+
+        function visualPress(id, isPressed) {
+            const btn = document.getElementById("btn-ch-" + id), wrap = document.getElementById("icon-wrap-" + id), lbl = document.getElementById("label-ch-" + id);
+            if (!btn) return;
+            if (isPressed) { btn.classList.add('btn-active-momentary'); if (wrap) wrap.style.color = "var(--lox-green)"; if (lbl) lbl.style.color = "var(--lox-green)"; }
+            else { setTimeout(() => { btn.classList.remove('btn-active-momentary'); if (wrap) wrap.style.color = ""; if (lbl) lbl.style.color = ""; }, 500); }
+        }
+
+        function toggleCamera(type) {
+            const dropdown = document.getElementById(`camera-dropdown-${type}`), video = document.getElementById(`video-player-${type}`);
+            let streamPath = "cam1_live/live.m3u8";
+            if (type === 'garage') streamPath = "cam2_live/live.m3u8";
+            else if (type === 'corridoio') streamPath = "cam3_live/live.m3u8";
+
+            const streamUrl = streamPath + "?t=" + Date.now();
+            let hlsObj = type === 'casa' ? hlsCasa : (type === 'corridoio' ? hlsCorridoio : hlsGarage);
+
+            if (dropdown.classList.contains('open')) {
+                dropdown.classList.remove('open');
+                if (hlsObj) hlsObj.destroy();
+                if (type === 'casa') hlsCasa = null;
+                else if (type === 'corridoio') hlsCorridoio = null;
+                else hlsGarage = null;
+                video.pause();
+                video.removeAttribute('src');
+                video.load();
+            } else {
+                dropdown.classList.add('open');
+                if (Hls.isSupported()) {
+                    const n = new Hls({
+                        liveSyncDurationCount: 1,
+                        liveMaxLatencyDurationCount: 2,
+                        maxBufferLength: 2,
+                        enableWorker: true
+                    });
+                    n.loadSource(streamUrl);
+                    n.attachMedia(video);
+                    n.on(Hls.Events.MANIFEST_PARSED, () => {
+                        video.play().catch(e => console.log("Autoplay:", e));
+                    });
+                    if (type === 'casa') hlsCasa = n;
+                    else if (type === 'corridoio') hlsCorridoio = n;
+                    else hlsGarage = n;
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    video.src = streamUrl;
+                    video.play();
+                }
+            }
+        }
+
+        function updateTimerProgress(data) {
+            const fill = document.getElementById('timer-fill-Ricircolo.shelly'), text = document.getElementById('timer-text-Ricircolo.shelly'), cont = document.getElementById('timer-cont-Ricircolo.shelly');
+            if (!fill || !cont || !text) return;
+            if (!data.output || !data.timer_duration) { cont.style.display = 'none'; if (timerInterval) clearInterval(timerInterval); return; }
+            cont.style.display = 'block'; if (timerInterval) clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                const rem = Math.max(0, data.timer_duration - (Date.now() / 1000 - data.timer_started_at));
+                if (rem <= 0) { clearInterval(timerInterval); cont.style.display = 'none'; }
+                else { const m = Math.floor(rem / 60), s = Math.floor(rem % 60); text.innerText = `${m}:${s.toString().padStart(2, '0')}`; fill.style.width = (rem / data.timer_duration * 100) + "%"; }
+            }, 1000);
+        }
+
+        function updateGarageStatus(id, payload) {
+            const btn = document.getElementById("btn-ch-" + id), path = document.getElementById("path-ch-" + id), label = document.getElementById("label-ch-" + id), dot = document.getElementById("dot-ch-" + id);
+            if (!btn) return;
+            const msg = payload.toUpperCase().trim();
+            btn.classList.remove('locked-mode');
+            if (msg === "LOCKED" || msg === "BLOCCATO") { btn.classList.add('locked-mode'); if (path) path.setAttribute("d", ICON_LOCKED); if (label) label.innerText = "BLOCCATO"; if (dot) dot.className = "status-dot bg-red-500"; }
+            else { if (path) path.setAttribute("d", ICON_READY); if (label) label.innerText = "PRONTO"; if (dot) dot.className = "status-dot bg-gray-700"; }
+        }
+
+        function updateInputUI(idx, state) {
+            const text = document.getElementById("io-in" + idx + "-text"), cont = document.getElementById("container-in" + idx);
+            if (!text || !cont) return;
+            text.innerText = state ? "INSERITO" : "DISINSERITO";
+            text.className = state ? "text-red-500 font-bold italic px-3 py-1 rounded bg-red-500/10 text-xs" : "text-gray-500 font-bold italic px-3 py-1 rounded bg-black/30 text-xs";
+            cont.className = state ? "flex justify-between items-center bg-red-500/5 p-4 rounded-lg border border-red-500/30 transition-all" : "flex justify-between items-center bg-black/20 p-4 rounded-lg border border-white/5 transition-all";
+            if (idx === 0) { document.getElementById('io-in0-label').innerText = state ? "Allarme Attivo" : "Allarme Disattivo"; }
+        }
+
+        function updateDeviceUI(id, isOn) {
+            states[id] = isOn; const val = document.getElementById("status-val-" + id); if (!val) return;
+            val.innerText = isOn ? 'ATTIVO' : 'DISATTIVATO'; val.className = isOn ? 'text-[#6ab31d] text-[9px] font-bold' : 'text-gray-500 text-[9px] font-bold';
+            document.getElementById("dot-" + id).className = "status-dot " + (isOn ? 'bg-[#6ab31d] pulse-green' : 'bg-gray-700');
+            document.getElementById("icon-bg-" + id).className = "p-2 rounded-lg " + (isOn ? 'bg-[#6ab31d]/10 text-[#6ab31d]' : 'bg-gray-800/50 text-gray-600');
+            if (id === "TapoHome.shelly") {
+                const el = document.getElementById('ctrl-camera-casa');
+                if (el) el.style.display = isOn ? 'block' : 'none';
+            }
+            if (id === "AllarmeIO.shelly") {
+                const el = document.getElementById('ctrl-camera-corridoio');
+                if (el) el.style.display = isOn ? 'block' : 'none';
+            }
+        }
+
+        function updateShutterUI(v) {
+            const st = document.getElementById('shutter-status'), vo = document.getElementById('io-volts'), ca = document.getElementById('shutter-card');
+            vo.innerText = v.toFixed(2);
+            if (v > 5.3) { st.innerText = "APERTA"; st.className = "text-red-500 text-2xl font-bold uppercase tracking-widest"; ca.className = "bg-red-500/5 rounded-xl p-6 border border-red-500/40 text-center"; }
+            else if (v > 1.0) { st.innerText = "CHIUSA"; st.className = "text-[#6ab31d] text-2xl font-bold uppercase tracking-widest"; ca.className = "bg-green-500/5 rounded-xl p-6 border border-green-500/20 text-center"; }
+        }
+
+        // Calcolo unificato della velocità del flusso (rapporto potenza/velocità più basso = animazione più lenta e rilassata)
+        function getFlowAnimationDuration(powerW) {
+            const p = Math.max(5, Math.min(Number(powerW) || 0, 4500));
+            // Da ~5.6s (minimo/idle 0-50W) a ~1.4s (oltre 3500W sovraccarico)
+            const factor = Math.sqrt(p / 4000);
+            return Math.max(1.35, 5.6 - factor * 3.9);
+        }
+
+        let lastEmValues = { power: null, voltage: null, current: null, energy: null };
+        function updateEmCard(pw, v, a, kwh) {
+            if (pw !== null && pw !== undefined && !isNaN(pw)) lastEmValues.power = Number(pw);
+            if (v !== null && v !== undefined && !isNaN(v)) lastEmValues.voltage = Number(v);
+            if (a !== null && a !== undefined && !isNaN(a)) lastEmValues.current = Number(a);
+            if (kwh !== null && kwh !== undefined && !isNaN(kwh)) lastEmValues.energy = Number(kwh);
+
+            const p = lastEmValues.power;
+            const powEl = document.getElementById('em-live-power');
+            const vEl = document.getElementById('em-live-voltage');
+            const aEl = document.getElementById('em-live-current');
+            const eEl = document.getElementById('em-live-energy');
+            const track = document.getElementById('em-flow-track');
+            const particles = document.getElementById('em-flow-particles');
+            const pill = document.getElementById('em-flow-pill');
+            const statusText = document.getElementById('em-flow-status');
+
+            if (p !== null && powEl) {
+                powEl.innerHTML = `${Math.round(p)}<span class="text-[9px] font-normal text-gray-400 ml-0.5">W</span>`;
+                const duration = getFlowAnimationDuration(p);
+                if (track) track.style.animationDuration = `${duration.toFixed(2)}s`;
+                if (particles) particles.style.animationDuration = `${(duration * 0.7).toFixed(2)}s`;
+
+                if (p > 2800) {
+                    powEl.className = "text-base sm:text-lg font-bold text-red-500 font-mono leading-tight mt-0.5 animate-pulse";
+                    if (pill) {
+                        pill.className = "flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-[9px] font-bold text-red-500 uppercase tracking-wider";
+                        if (statusText) statusText.textContent = "Sovraccarico!";
+                    }
+                    if (track) track.style.filter = "drop-shadow(0 0 7px #ef4444)";
+                } else if (p > 2000) {
+                    powEl.className = "text-base sm:text-lg font-bold text-amber-400 font-mono leading-tight mt-0.5";
+                    if (pill) {
+                        pill.className = "flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-[9px] font-bold text-amber-400 uppercase tracking-wider";
+                        if (statusText) statusText.textContent = "Carico Alto";
+                    }
+                    if (track) track.style.filter = "drop-shadow(0 0 6px #f59e0b)";
+                } else {
+                    powEl.className = "text-base sm:text-lg font-bold text-[#6ab31d] font-mono leading-tight mt-0.5";
+                    if (pill) {
+                        pill.className = "flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#6ab31d]/10 border border-[#6ab31d]/30 text-[9px] font-bold text-[#6ab31d] uppercase tracking-wider";
+                        if (statusText) statusText.textContent = "Flusso Attivo";
+                    }
+                    if (track) track.style.filter = "drop-shadow(0 0 5px rgba(106, 179, 29, 0.7))";
+                }
+            }
+
+            if (lastEmValues.voltage !== null && vEl) {
+                vEl.innerHTML = `${lastEmValues.voltage.toFixed(1)}<span class="text-[9px] font-normal text-gray-400 ml-0.5">V</span>`;
+            }
+            if (lastEmValues.current !== null && aEl) {
+                aEl.innerHTML = `${lastEmValues.current.toFixed(2)}<span class="text-[9px] font-normal text-gray-400 ml-0.5">A</span>`;
+            }
+            if (lastEmValues.energy !== null && eEl) {
+                eEl.innerHTML = `${lastEmValues.energy.toFixed(2)}<span class="text-[9px] font-normal text-gray-400 ml-0.5">kWh</span>`;
+            }
+        }
+
+        let lastBoxValues = { power: null, voltage: null, current: null, energy: null };
+        function updateBoxCard(pw, v, a, kwh) {
+            if (pw !== null && pw !== undefined && !isNaN(pw)) lastBoxValues.power = Number(pw);
+            if (v !== null && v !== undefined && !isNaN(v)) lastBoxValues.voltage = Number(v);
+            if (a !== null && a !== undefined && !isNaN(a)) lastBoxValues.current = Number(a);
+            if (kwh !== null && kwh !== undefined && !isNaN(kwh)) lastBoxValues.energy = Number(kwh);
+
+            const p = lastBoxValues.power;
+            const powEl = document.getElementById('box-live-power');
+            const vEl = document.getElementById('box-live-voltage');
+            const aEl = document.getElementById('box-live-current');
+            const eEl = document.getElementById('box-live-energy');
+            const track = document.getElementById('box-flow-track');
+            const particles = document.getElementById('box-flow-particles');
+            const pill = document.getElementById('box-flow-pill');
+            const statusText = document.getElementById('box-flow-status');
+
+            if (p !== null && powEl) {
+                powEl.innerHTML = `${Math.round(p)}<span class="text-[9px] font-normal text-gray-400 ml-0.5">W</span>`;
+                const duration = getFlowAnimationDuration(p);
+                if (track) track.style.animationDuration = `${duration.toFixed(2)}s`;
+                if (particles) particles.style.animationDuration = `${(duration * 0.7).toFixed(2)}s`;
+
+                if (p > 2500) {
+                    powEl.className = "text-base sm:text-lg font-bold text-red-500 font-mono leading-tight mt-0.5 animate-pulse";
+                    if (pill) {
+                        pill.className = "flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-[9px] font-bold text-red-500 uppercase tracking-wider";
+                        if (statusText) statusText.textContent = "Sovraccarico!";
+                    }
+                    if (track) track.style.filter = "drop-shadow(0 0 7px #ef4444)";
+                } else if (p > 1800) {
+                    powEl.className = "text-base sm:text-lg font-bold text-amber-400 font-mono leading-tight mt-0.5";
+                    if (pill) {
+                        pill.className = "flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-[9px] font-bold text-amber-400 uppercase tracking-wider";
+                        if (statusText) statusText.textContent = "Carico Alto";
+                    }
+                    if (track) track.style.filter = "drop-shadow(0 0 6px #f59e0b)";
+                } else {
+                    powEl.className = "text-base sm:text-lg font-bold text-[#06b6d4] font-mono leading-tight mt-0.5";
+                    if (pill) {
+                        pill.className = "flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#06b6d4]/10 border border-[#06b6d4]/30 text-[9px] font-bold text-[#06b6d4] uppercase tracking-wider";
+                        if (statusText) statusText.textContent = "Flusso Attivo";
+                    }
+                    if (track) track.style.filter = "drop-shadow(0 0 5px rgba(6, 182, 212, 0.7))";
+                }
+            }
+
+            if (lastBoxValues.voltage !== null && vEl) {
+                vEl.innerHTML = `${lastBoxValues.voltage.toFixed(1)}<span class="text-[9px] font-normal text-gray-400 ml-0.5">V</span>`;
+            }
+            if (lastBoxValues.current !== null && aEl) {
+                aEl.innerHTML = `${lastBoxValues.current.toFixed(2)}<span class="text-[9px] font-normal text-gray-400 ml-0.5">A</span>`;
+            }
+            if (lastBoxValues.energy !== null && eEl) {
+                eEl.innerHTML = `${lastBoxValues.energy.toFixed(2)}<span class="text-[9px] font-normal text-gray-400 ml-0.5">kWh</span>`;
+            }
+        }
+
+        async function fetchLivePower() {
+            try {
+                const resCasa = await fetch('/cgi-bin/power_data.py?device=PowerMeterHome.shelly&mode=live');
+                if (resCasa.ok) {
+                    const d = await resCasa.json();
+                    if (d && d.power_w !== undefined) {
+                        updateEmCard(d.power_w, d.voltage, d.current, d.energy_kwh);
+                    }
+                }
+            } catch(e) {}
+            try {
+                const resBox = await fetch('/cgi-bin/power_data.py?device=PowerMeterBox.shelly&mode=live');
+                if (resBox.ok) {
+                    const d = await resBox.json();
+                    if (d && d.power_w !== undefined) {
+                        updateBoxCard(d.power_w, d.voltage, d.current, d.energy_kwh);
+                    }
+                }
+            } catch(e) {}
+        }
+        setInterval(fetchLivePower, 10000);
+
+        client.onMessageArrived = (msg) => {
+            const topic = msg.destinationName, payload = msg.payloadString;
+            if (topic.startsWith("garage/stato/")) { updateGarageStatus(topic.split('/').pop(), payload); return; }
+            const parts = topic.split('/'), deviceId = parts[0], subTopic = parts.slice(1).join('/');
+
+            // --- TELEMETRIA DIRETTA SHELLY EM (RETE CASA) ---
+            if (deviceId === POWERMETER_HOME_ID || (parts[0] === 'shellies' && parts[1] === POWERMETER_HOME_ID)) {
+                const topicLower = topic.toLowerCase();
+                const emVal = parseFloat(payload);
+                if (!isNaN(emVal)) {
+                    if (topicLower.endsWith('/power') || topicLower.endsWith('/apower')) {
+                        updateEmCard(emVal, null, null, null);
+                        return;
+                    }
+                    if (topicLower.endsWith('/voltage')) {
+                        updateEmCard(null, emVal, null, null);
+                        return;
+                    }
+                    if (topicLower.endsWith('/current') || topicLower.endsWith('/a')) {
+                        updateEmCard(null, null, emVal, null);
+                        return;
+                    }
+                    if (topicLower.endsWith('/total') || topicLower.endsWith('/energy') || topicLower.endsWith('/aenergy')) {
+                        updateEmCard(null, null, null, emVal > 100 ? emVal / 1000.0 : emVal);
+                        return;
+                    }
+                }
+            }
+
+            // --- TELEMETRIA DIRETTA SHELLY BOX (GARAGE) ---
+            const isBox = (deviceId.toLowerCase() === 'powermeterbox.shelly' || deviceId.toLowerCase() === 'powermeterbox') ||
+                          (parts[0] === 'shellies' && parts[1] && parts[1].toLowerCase().includes('powermeterbox'));
+            if (isBox) {
+                const topicLower = topic.toLowerCase();
+                const boxVal = parseFloat(payload);
+                if (!isNaN(boxVal)) {
+                    if (topicLower.endsWith('/power') || topicLower.endsWith('/apower')) {
+                        updateBoxCard(boxVal, null, null, null);
+                        return;
+                    }
+                    if (topicLower.endsWith('/voltage')) {
+                        updateBoxCard(null, boxVal, null, null);
+                        return;
+                    }
+                    if (topicLower.endsWith('/current') || topicLower.endsWith('/a')) {
+                        updateBoxCard(null, null, boxVal, null);
+                        return;
+                    }
+                    if (topicLower.endsWith('/total') || topicLower.endsWith('/energy') || topicLower.endsWith('/aenergy')) {
+                        updateBoxCard(null, null, null, boxVal > 100 ? boxVal / 1000.0 : boxVal);
+                        return;
+                    }
+                }
+            }
+
+            // --- AUTO-DISCOVERY: intercetta device *.shelly sconosciuti ---
+            if (deviceId && deviceId.endsWith('.shelly') && !discoveredDevices.has(deviceId)) {
+                discoveredDevices.add(deviceId);
+                const allKnown = new Set([...KNOWN_IDS, ...extraDevicesCasa.map(d => d.id)]);
+                if (!allKnown.has(deviceId) && !ignoredDevices.has(deviceId)) {
+                    updateDiscoveryUI();
+                }
+            }
+
+            try {
+                const data = JSON.parse(payload);
+
+                // Telemetria Shelly EM Casa da JSON /status o /events/rpc
+                if (deviceId === POWERMETER_HOME_ID || (parts[0] === 'shellies' && parts[1] === POWERMETER_HOME_ID)) {
+                    if (data.emeters && data.emeters[0]) {
+                        const em0 = data.emeters[0];
+                        updateEmCard(
+                            em0.power, 
+                            em0.voltage, 
+                            em0.current, 
+                            em0.total !== undefined ? (em0.total > 100 ? em0.total / 1000.0 : em0.total) : null
+                        );
+                    }
+                    if (data.params) {
+                        if (data.params['em:0']) {
+                            const em0 = data.params['em:0'];
+                            updateEmCard(em0.act_power, em0.voltage, em0.current, em0.a_total ? em0.a_total / 1000.0 : null);
+                        }
+                        if (data.params['pm1:0']) {
+                            const pm0 = data.params['pm1:0'];
+                            updateEmCard(pm0.apower, pm0.voltage, pm0.current, pm0.aenergy ? pm0.aenergy.total / 1000.0 : null);
+                        }
+                    }
+                }
+
+                // Telemetria Shelly Box Garage da JSON /status o /events/rpc
+                if (isBox) {
+                    if (data.emeters && data.emeters[0]) {
+                        const em0 = data.emeters[0];
+                        updateBoxCard(
+                            em0.power, 
+                            em0.voltage, 
+                            em0.current, 
+                            em0.total !== undefined ? (em0.total > 100 ? em0.total / 1000.0 : em0.total) : null
+                        );
+                    }
+                    if (data.params) {
+                        if (data.params['em:0']) {
+                            const em0 = data.params['em:0'];
+                            updateBoxCard(em0.act_power, em0.voltage, em0.current, em0.a_total ? em0.a_total / 1000.0 : null);
+                        }
+                        if (data.params['pm1:0']) {
+                            const pm0 = data.params['pm1:0'];
+                            updateBoxCard(pm0.apower, pm0.voltage, pm0.current, pm0.aenergy ? pm0.aenergy.total / 1000.0 : null);
+                        }
+                    }
+                }
+
+                // 1. Status diretto via topic status/switch:0 (retained, aggiornato da Shelly)
+                if (subTopic === "status/switch:0") {
+                    console.debug(`[MQTT] ${deviceId} status/switch:0 → output=${data.output}`);
+                    updateDeviceUI(deviceId, data.output);
+                    if (deviceId === "Ricircolo.shelly") updateTimerProgress(data);
+                }
+
+                // 2. Input e voltmetro per AllarmeIO
+                if (deviceId === IO_ID) {
+                    if (subTopic === "status/input:0") updateInputUI(0, data.state);
+                    if (subTopic === "status/input:1") updateInputUI(1, data.state);
+                    if (subTopic === "status/voltmeter:100") updateShutterUI(data.voltage);
+                }
+
+                // 3. NotifyStatus da events/rpc (cambiamenti real-time: pulsante fisico, app, ecc.)
+                if (data.method === "NotifyStatus" && data.params) {
+                    const p = data.params;
+                    if (p['switch:0'] && p['switch:0'].output !== undefined) {
+                        console.debug(`[MQTT] ${deviceId} NotifyStatus switch:0.output=${p['switch:0'].output}`);
+                        updateDeviceUI(deviceId, p['switch:0'].output);
+                        if (deviceId === "Ricircolo.shelly") updateTimerProgress(p['switch:0']);
+                    }
+                    if (deviceId === IO_ID) {
+                        if (p['input:0']) updateInputUI(0, p['input:0'].state);
+                        if (p['input:1']) updateInputUI(1, p['input:1'].state);
+                        if (p['voltmeter:100']) updateShutterUI(p['voltmeter:100'].voltage);
+                        if (p['switch:0']) updateDeviceUI(deviceId, p['switch:0'].output);
+                    }
+                }
+
+                // 4. Risposta RPC (Switch.GetStatus / Shelly.GetStatus)
+                if (data.result) {
+                    const r = data.result;
+                    console.debug(`[MQTT] ${deviceId} RPC result:`, JSON.stringify(r).substring(0, 120));
+                    if (deviceId === IO_ID) {
+                        if (r['input:0']) updateInputUI(0, r['input:0'].state);
+                        if (r['input:1']) updateInputUI(1, r['input:1'].state);
+                        if (r['voltmeter:100']) updateShutterUI(r['voltmeter:100'].voltage);
+                        if (r['switch:0']) { updateDeviceUI(deviceId, r['switch:0'].output); if (deviceId === "Ricircolo.shelly") updateTimerProgress(r['switch:0']); }
+                    } else {
+                        const sw = r['switch:0'] || r;
+                        if (sw.output !== undefined) {
+                            console.debug(`[MQTT] ${deviceId} GetStatus → output=${sw.output}`);
+                            updateDeviceUI(deviceId, sw.output);
+                            if (deviceId === "Ricircolo.shelly") updateTimerProgress(sw);
+                        }
+                    }
+                }
+
+                // 5. Errore RPC (es. device non supporta il metodo)
+                if (data.error) {
+                    console.warn(`[MQTT] ${deviceId} RPC error ${data.error.code}: ${data.error.message}`);
+                }
+
+            } catch (e) { }
+        };
+
+        function toggleDevice(id) { const s = states[id] || false; publish(id + "/rpc", JSON.stringify({ id: 1, src: CLIENT_ID, method: "Switch.Set", params: { id: 0, on: !s } })); }
+        function publish(t, m) { const msg = new Paho.MQTT.Message(m); msg.destinationName = t; client.send(msg); }
+        function updateConnUI(c) {
+            const t = document.getElementById('status-text'), d = document.getElementById('ping-solid');
+            if (t) { t.innerText = c ? "Online" : "Disconnesso"; t.style.color = c ? "var(--lox-green)" : "#ef4444"; }
+            if (d) d.className = "status-dot " + (c ? 'bg-[#6ab31d] pulse-green' : 'bg-red-500');
+        }
+        client.onConnectionLost = () => { updateConnUI(false); setTimeout(initDashboard, 5000); };
+    </script>
+</body>
+
+</html>

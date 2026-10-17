@@ -1,0 +1,8 @@
+{
+  "123456789": {
+    "first_name": "Admin Esempio",
+    "username": "admin_demo",
+    "auth_date": "2026-01-01 00:00:00",
+    "status": "approved"
+  }
+}

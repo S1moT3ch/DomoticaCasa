@@ -1,0 +1,10 @@
+{
+  "name": "power-outage-monitor-vercel",
+  "version": "1.0.0",
+  "description": "Vercel Serverless Power Outage Monitor & Telegram Watchdog",
+  "dependencies": {
+    "@upstash/redis": "^1.31.0",
+    "axios": "^1.7.0",
+    "dotenv": "^16.4.5"
+  }
+}

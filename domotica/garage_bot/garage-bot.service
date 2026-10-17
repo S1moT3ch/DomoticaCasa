@@ -1,0 +1,17 @@
+[Unit]
+Description=Telegram Bots AllarmeGarage & Serranda (2FA ACSAHomeUtils)
+After=network.target mosquitto.service
+Wants=mosquitto.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/www/domotica/garage_bot
+ExecStart=/usr/bin/python3 -u /www/domotica/garage_bot/garage_bot.py
+Restart=always
+RestartSec=10
+MemoryHigh=60M
+MemoryMax=80M
+
+[Install]
+WantedBy=multi-user.target

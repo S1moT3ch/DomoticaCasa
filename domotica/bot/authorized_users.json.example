@@ -1,0 +1,14 @@
+{
+  "123456789": {
+    "name": "Admin Esempio",
+    "username": "admin_demo",
+    "role": "admin",
+    "notifications": {
+      "outage": true,
+      "humidity": true,
+      "shutter": true,
+      "door": true,
+      "printer": true
+    }
+  }
+}

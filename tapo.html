@@ -1,0 +1,30 @@
+<TYPE html>
+<html>
+<head>
+    <title>Tapo Control</title>
+    <style>
+        button { width: 80px; height: 50px; margin: 5px; font-weight: bold; }
+        .container { text-align: center; margin-top: 50px; }
+    </style>
+</head>
+<body style="background: #222; color: white; font-family: sans-serif;">
+    <div class="container">
+        <h1>Controllo Tapo Garage</h1>
+        <p>Usa VLC per il video: <i>rtsp://192.168.1.162:8554/stream1</i></p>
+        <br>
+        <button onclick="move('up')">SU</button><br>
+        <button onclick="move('left')">SINISTRA</button>
+        <button onclick="move('right')">DESTRA</button><br>
+        <button onclick="move('down')">GI&Ugrave;</button>
+    </div>
+
+    <script>
+        function move(direction) {
+            // Nota: Per far funzionare questo servirebbe un backend CGI
+            // Ma per ora usiamo un alert per testare la struttura
+            alert("Comando inviato: " + direction);
+        }
+    </script>
+</body>
+</html>
+

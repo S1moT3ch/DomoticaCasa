@@ -1,0 +1,17 @@
+[Unit]
+Description=Shelly CoIoT to MQTT Bridge
+After=network.target mosquitto.service
+Wants=mosquitto.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/www/domotica/bot
+ExecStart=/usr/bin/python3 /www/domotica/bot/coiot_bridge.py
+Restart=always
+RestartSec=10
+MemoryHigh=60M
+MemoryMax=80M
+
+[Install]
+WantedBy=multi-user.target

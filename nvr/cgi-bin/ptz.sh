@@ -1,0 +1,1 @@
+/www/cgi-bin/ptz.sh
