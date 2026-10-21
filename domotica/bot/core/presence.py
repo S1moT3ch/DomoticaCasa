@@ -16,7 +16,7 @@ class PresenceManager:
 
     def __init__(self, router_ip=None, ssh_key=None, poll_interval=15, aliases_file=None):
         self.router_ip = router_ip or getattr(config, "OPENWRT_ROUTER_IP", "192.168.1.1")
-        self.ssh_key = ssh_key or getattr(config, "OPENWRT_SSH_KEY", "/root/.ssh/id_rsa")
+        self.ssh_key = ssh_key or getattr(config, "OPENWRT_SSH_KEY", "/root/.ssh/id_openwrt")
         self.poll_interval = int(poll_interval)
         self.aliases_file = aliases_file or os.path.join(os.path.dirname(os.path.dirname(__file__)), "aliases.json")
 

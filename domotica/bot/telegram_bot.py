@@ -810,6 +810,26 @@ class TelegramBot:
             self._answer_callback_query(cb_id, "Operazione annullata.")
             self._edit_message_text(chat_id, msg_id, "❌ *Operazione Modalità Vacanza annullata.*")
 
+        elif data == "cable_refresh":
+            self._answer_callback_query(cb_id, "Aggiornamento parametri cavo...")
+            self._edit_message_text(chat_id, msg_id, "⏳ _Rilevazione parametri fisici del cavo dorsale in corso..._")
+
+            def _worker_cable():
+                try:
+                    report = self.tracker.get_backbone_cable_report()
+                    cable_kb = {
+                        "inline_keyboard": [
+                            [{"text": "🔄 Aggiorna Parametri", "callback_data": "cable_refresh"}],
+                            [{"text": "🚀 Test Velocità iperf3 (Box)", "callback_data": "iperf_target:192.168.3.2"}]
+                        ]
+                    }
+                    self._edit_message_text(chat_id, msg_id, report, reply_markup=cable_kb)
+                except Exception as e_cable:
+                    print(f"[!] Errore _worker_cable: {e_cable}")
+                    self._edit_message_text(chat_id, msg_id, f"⚠️ *Errore diagnostica dorsale*: `{e_cable}`")
+
+            threading.Thread(target=_worker_cable, daemon=True).start()
+
         elif data.startswith("iperf_target:"):
             target_ip = data.split(":", 1)[1]
             self._answer_callback_query(cb_id, f"Avvio test verso {target_ip}...")
@@ -1959,6 +1979,7 @@ class TelegramBot:
                 "🌐 /networkstatus - **Stato Nodi di Rete** (Firewall, Home Server, AP Box)\n"
                 "🛡️ /adblockerstats - **Statistiche AdGuardHome** (Query DNS e Blocco Ads)\n"
                 "🔌 /linkspeed - **Velocità Link Fisici Ethernet** (Interfacce OpenWRT)\n"
+                "🔌 /dorsale - **Parametri Fisici Cavo Dorsale** (Diagnostica bidirezionale Gateway + DGA Box)\n"
                 "📊 /bandainuso - **Banda Passante Istantanea & Processi di Rete** (MB/s, KB/s)\n"
                 "🚀 /iperf `[IP]` - **Test Banda Passante Reale** (Test iperf3 in Mbps/Gbps)\n"
                 "📱 /dispositivi - **Stato Connettività Ping Dispositivi Domotici** (Casa & Garage)\n"
@@ -2273,7 +2294,7 @@ class TelegramBot:
                         )
 
                         arp_output = subprocess.check_output(
-                            ['ssh', '-i', '/root/.ssh/id_rsa', '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=3', '-o', 'BatchMode=yes', 'root@192.168.1.1', sh_script],
+                            ['ssh', '-i', getattr(config, 'OPENWRT_SSH_KEY', '/root/.ssh/id_openwrt'), '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=3', '-o', 'BatchMode=yes', 'root@192.168.1.1', sh_script],
                             stderr=subprocess.DEVNULL, timeout=6
                         ).decode('utf-8').lower()
 
@@ -2335,6 +2356,25 @@ class TelegramBot:
             self.send_message(chat_id, "⏳ _Lettura velocità dei link fisici delle interfacce Ethernet OpenWRT..._")
             report = self.tracker.get_openwrt_link_speeds_report()
             self.send_message(chat_id, report)
+
+        elif cmd in ["/dorsale", "/cavo", "/cavodorsale", "/cable", "/dga", "/linkbox"]:
+            self.send_message(chat_id, "⏳ _Interrogazione router per diagnostica parametri fisici cavo dorsale..._")
+
+            def _do_cable():
+                try:
+                    report = self.tracker.get_backbone_cable_report()
+                    cable_kb = {
+                        "inline_keyboard": [
+                            [{"text": "🔄 Aggiorna Parametri", "callback_data": "cable_refresh"}],
+                            [{"text": "🚀 Test Velocità iperf3 (Box)", "callback_data": "iperf_target:192.168.3.2"}]
+                        ]
+                    }
+                    self.send_message(chat_id, report, reply_markup=cable_kb)
+                except Exception as e_cable:
+                    print(f"[!] Errore _do_cable: {e_cable}")
+                    self.send_message(chat_id, f"⚠️ *Errore diagnostica dorsale*: `{e_cable}`")
+
+            threading.Thread(target=_do_cable, daemon=True).start()
 
         elif cmd in ["/iperf", "/speedtest"]:
             parts = text_clean.split()

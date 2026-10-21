@@ -7,8 +7,23 @@ import time
 # --- CONFIGURAZIONE ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TOKEN_FILE = os.path.join(BASE_DIR, "tokens.json")
-CLIENT_ID = 'OoexZXH9XPMtqqRU7sEZdQ9S'
-CLIENT_SECRET = '_G0dyD2xEwRfogctQFG7fOfAK4nlJqrBskqJhCPjWWx6jB0sAVFFvuBDDFNsbw3P4YhEUEB9JuqaL1XFdBdtMw'
+
+# Carica variabili dal file .env centrale se presente
+env_file = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "bot", ".env"))
+if os.path.exists(env_file):
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(env_file)
+    except ImportError:
+        with open(env_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line_str = line.strip()
+                if "=" in line_str and not line_str.startswith("#"):
+                    k, v = line_str.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+CLIENT_ID = os.getenv("DAIKIN_CLIENT_ID", "")
+CLIENT_SECRET = os.getenv("DAIKIN_CLIENT_SECRET", "")
 
 TOKEN_URL = "https://idp.onecta.daikineurope.com/v1/oidc/token"
 BASE_URL = "https://api.onecta.daikineurope.com/v1"

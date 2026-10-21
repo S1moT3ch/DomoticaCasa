@@ -13,11 +13,25 @@ except ImportError as e:
     print(f"Errore di importazione: {e}")
     sys.exit(1)
 
-# Credenziali estratte dallo script originale
-CLIENT_ID = "68cd33d12bbaa06205099cf0"
-CLIENT_SECRET = "q66X8MVs6XUSu5hEFmsjr3Wet1GcT9tuQt"
-REFRESH_TOKEN = "67eeeb5f6a703cd05a0f513a|84f5faf97c2f614b269e0a4a1fc93c23"
-HOME_ID = "67eeee4f0bc3615f0a0e016a"
+# Carica variabili dal file .env centrale se presente
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+env_file = os.path.abspath(os.path.join(BASE_DIR, "..", "..", "bot", ".env"))
+if os.path.exists(env_file):
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(env_file)
+    except ImportError:
+        with open(env_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line_str = line.strip()
+                if "=" in line_str and not line_str.startswith("#"):
+                    k, v = line_str.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+
+CLIENT_ID = os.getenv("NETATMO_CLIENT_ID", "")
+CLIENT_SECRET = os.getenv("NETATMO_CLIENT_SECRET", "")
+REFRESH_TOKEN = os.getenv("NETATMO_REFRESH_TOKEN", "")
+HOME_ID = os.getenv("NETATMO_HOME_ID", "")
 
 print("==================================================")
 print(" TEST DI CONNESSIONE DIRETTA SERVER NETATMO/BTICINO")

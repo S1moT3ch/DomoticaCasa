@@ -1,0 +1,2139 @@
+<!DOCTYPE html>
+<html lang="it">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Switch Hardware & TDR Diagnostics</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Outfit:wght@300;400;600;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg-base: #0a0d14;
+            --bg-card: #121722;
+            --bg-chassis: #181e2b;
+            --border-chassis: #2a3447;
+            --chassis-inner: #0f131c;
+            --accent-cyan: #00d2ff;
+            --accent-green: #00e676;
+            --accent-amber: #ffab00;
+            --accent-red: #ff3d71;
+            --accent-blue: #2979ff;
+            --text-primary: #f0f4fc;
+            --text-muted: #8391a8;
+            --rj45-metal: #333d52;
+            --rj45-hole: #090c12;
+            --rj45-pins: #ffd700;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            font-family: 'Outfit', sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+            background-image:
+                radial-gradient(circle at 10% 20%, rgba(0, 210, 255, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(0, 230, 118, 0.04) 0%, transparent 40%);
+        }
+
+        header {
+            padding: 1.5rem 2.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            backdrop-filter: blur(12px);
+            background: rgba(18, 23, 34, 0.7);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .brand-icon {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #00d2ff, #2979ff);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 20px rgba(0, 210, 255, 0.35);
+        }
+
+        .brand-icon svg {
+            width: 24px;
+            height: 24px;
+            fill: #fff;
+        }
+
+        .brand h1 {
+            font-size: 1.35rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #fff, #b8c7e0);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .brand p {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .btn-refresh {
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: var(--text-primary);
+            padding: 0.65rem 1.25rem;
+            border-radius: 10px;
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 0.85rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: all 0.2s ease;
+        }
+
+        .btn-refresh:hover {
+            background: rgba(0, 210, 255, 0.15);
+            border-color: rgba(0, 210, 255, 0.4);
+            transform: translateY(-1px);
+        }
+
+        .btn-refresh svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+            transition: transform 0.4s ease;
+        }
+
+        .btn-refresh.spinning svg {
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        main {
+            flex: 1;
+            padding: 2.5rem;
+            max-width: 1600px;
+            width: 100%;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 440px;
+            gap: 2.5rem;
+        }
+
+        @media (max-width: 1200px) {
+            main {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .switches-container {
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        /* HARDWARE SWITCH CHASSIS */
+        .switch-chassis {
+            background: var(--bg-chassis);
+            border: 1px solid var(--border-chassis);
+            border-radius: 16px;
+            padding: 1.5rem 2rem;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .switch-chassis::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+        }
+
+        .chassis-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .device-info {
+            display: flex;
+            align-items: center;
+            gap: 0.85rem;
+        }
+
+        .device-badge {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 0.25rem 0.65rem;
+            border-radius: 6px;
+            letter-spacing: 0.5px;
+        }
+
+        .badge-r7000 {
+            background: rgba(0, 210, 255, 0.15);
+            color: var(--accent-cyan);
+            border: 1px solid rgba(0, 210, 255, 0.3);
+        }
+
+        .badge-l2 {
+            background: rgba(179, 136, 255, 0.15);
+            color: #b388ff;
+            border: 1px solid rgba(179, 136, 255, 0.35);
+        }
+
+        .badge-timhub {
+            background: rgba(255, 171, 0, 0.15);
+            color: var(--accent-amber);
+            border: 1px solid rgba(255, 171, 0, 0.3);
+        }
+
+        .badge-c7 {
+            background: rgba(0, 230, 118, 0.15);
+            color: var(--accent-green);
+            border: 1px solid rgba(0, 230, 118, 0.3);
+        }
+
+        .device-name {
+            font-size: 1.15rem;
+            font-weight: 700;
+        }
+
+        .device-ip {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-left: 0.5rem;
+        }
+
+        .rack-panel {
+            background: var(--chassis-inner);
+            border: 1px solid #232b3d;
+            border-radius: 12px;
+            padding: 1.25rem 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            gap: 1.5rem;
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.6);
+            overflow-x: auto;
+        }
+
+        .port-group-separator {
+            width: 2px;
+            height: 60px;
+            background: #232b3d;
+            margin: 0 0.5rem;
+        }
+
+        /* RJ45 PORT STYLES */
+        .port-unit {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            user-select: none;
+            transition: transform 0.2s ease;
+        }
+
+        .port-unit:hover {
+            transform: translateY(-3px);
+        }
+
+        .port-unit.active .rj45-jack {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 15px rgba(0, 210, 255, 0.5), inset 0 0 10px rgba(0, 210, 255, 0.2);
+        }
+
+        .led-indicator {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: #202738;
+            box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8);
+            transition: all 0.3s ease;
+        }
+
+        /* LED STATES */
+        .led-1000 {
+            background: var(--accent-green);
+            box-shadow: 0 0 10px var(--accent-green), 0 0 20px var(--accent-green);
+        }
+
+        .led-100 {
+            background: var(--accent-amber);
+            box-shadow: 0 0 10px var(--accent-amber), 0 0 15px var(--accent-amber);
+        }
+
+        .led-down {
+            background: #2a3447;
+            box-shadow: none;
+        }
+
+        .rj45-jack {
+            width: 58px;
+            height: 52px;
+            background: var(--rj45-metal);
+            border: 2px solid #444f68;
+            border-radius: 6px;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
+            transition: all 0.2s ease;
+        }
+
+        .rj45-cavity {
+            width: 40px;
+            height: 34px;
+            background: var(--rj45-hole);
+            border-radius: 4px;
+            position: relative;
+            border: 1px solid #1a202c;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 3px 6px;
+        }
+
+        .rj45-pins-row {
+            display: flex;
+            justify-content: space-between;
+            width: 100%;
+            height: 6px;
+        }
+
+        .rj45-pin {
+            width: 2px;
+            height: 100%;
+            background: var(--rj45-pins);
+            border-radius: 1px;
+            opacity: 0.7;
+        }
+
+        .rj45-tab-notch {
+            width: 18px;
+            height: 8px;
+            background: #151a24;
+            border: 1px solid #283142;
+            align-self: center;
+            border-radius: 2px 2px 0 0;
+        }
+
+        .port-label {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            letter-spacing: -0.2px;
+        }
+
+        .port-unit.active .port-label {
+            color: var(--accent-cyan);
+        }
+
+        /* SIDE PANEL / DETAILS DRAWER */
+        .details-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border-chassis);
+            border-radius: 16px;
+            padding: 1.85rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+            height: fit-content;
+            position: sticky;
+            top: 6rem;
+        }
+
+        .panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            padding-bottom: 1.25rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .panel-title h2 {
+            font-size: 1.2rem;
+            font-weight: 700;
+        }
+
+        .panel-title p {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+
+        .port-status-badge {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 0.35rem 0.85rem;
+            border-radius: 20px;
+        }
+
+        .status-up-1000 {
+            background: rgba(0, 230, 118, 0.15);
+            color: var(--accent-green);
+            border: 1px solid rgba(0, 230, 118, 0.3);
+        }
+
+        .status-up-100 {
+            background: rgba(255, 171, 0, 0.15);
+            color: var(--accent-amber);
+            border: 1px solid rgba(255, 171, 0, 0.3);
+        }
+
+        .status-down {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-muted);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        /* TDR SECTION */
+        .tdr-card {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 12px;
+            padding: 1.25rem;
+        }
+
+        .card-title {
+            font-size: 0.85rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--accent-cyan);
+            margin-bottom: 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .pairs-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.85rem;
+        }
+
+        .pair-item {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        .pair-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .pair-name {
+            color: #d1dcfa;
+            font-weight: 600;
+        }
+
+        .pair-status {
+            font-weight: 600;
+        }
+
+        .status-ok {
+            color: var(--accent-green);
+        }
+
+        .status-open {
+            color: var(--accent-amber);
+        }
+
+        .status-short {
+            color: var(--accent-red);
+        }
+
+        .pair-bar-bg {
+            width: 100%;
+            height: 6px;
+            background: #1b2333;
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .pair-bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .bar-ok {
+            background: var(--accent-green);
+        }
+
+        .bar-open {
+            background: var(--accent-amber);
+        }
+
+        .bar-short {
+            background: var(--accent-red);
+        }
+
+        /* METRICS GRID */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.85rem;
+        }
+
+        .metric-box {
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 10px;
+            padding: 0.85rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .metric-label {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        .metric-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .metric-desc {
+            font-size: 0.7rem;
+            color: #8c9ba5;
+        }
+
+        .btn-test {
+            background: linear-gradient(135deg, #00d2ff, #2979ff);
+            color: #fff;
+            border: none;
+            padding: 0.85rem;
+            border-radius: 10px;
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 700;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            box-shadow: 0 4px 15px rgba(0, 210, 255, 0.3);
+            transition: all 0.2s ease;
+        }
+
+        .btn-test:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 210, 255, 0.5);
+        }
+
+        .btn-test:active {
+            transform: translateY(0);
+        }
+
+        .loader-radar {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem 0;
+            gap: 0.75rem;
+            color: var(--accent-cyan);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+        }
+
+        .radar-pulse {
+            width: 22px;
+            height: 22px;
+            border: 2px solid var(--accent-cyan);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        /* EMPTY STATE */
+        .empty-selection {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-muted);
+        }
+
+        .empty-selection svg {
+            width: 48px;
+            height: 48px;
+            stroke: #2e3a52;
+            margin-bottom: 1rem;
+        }
+
+        /* MODALE TOPOLOGIA CAVI FISICI */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(10, 13, 20, 0.92);
+            backdrop-filter: blur(12px);
+            z-index: 9999;
+            display: none;
+            flex-direction: column;
+            padding: 1.5rem;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .modal-overlay.open {
+            display: flex;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .modal-title-group h2 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #fff;
+        }
+
+        .modal-title-group p {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            margin-top: 4px;
+        }
+
+        .btn-close-modal {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #fff;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 1.2rem;
+        }
+
+        .btn-close-modal:hover {
+            background: rgba(255, 82, 82, 0.25);
+            border-color: #ff5252;
+            color: #ff5252;
+        }
+
+        .topo-canvas-container {
+            flex: 1;
+            position: relative;
+            background: radial-gradient(circle at 50% 50%, #151a28 0%, #0d101a 100%);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            overflow: auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: inset 0 0 50px rgba(0,0,0,0.6);
+        }
+
+        .topo-svg-layer {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        .topo-nodes-wrapper {
+            position: relative;
+            width: 1200px;
+            height: 720px;
+            z-index: 3;
+        }
+
+        .topo-node {
+            position: absolute;
+            background: rgba(22, 28, 42, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 12px;
+            padding: 1rem 1.25rem;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.6);
+            min-width: 280px;
+            transition: all 0.3s;
+        }
+
+        .topo-node:hover {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 12px 30px rgba(0, 210, 255, 0.2);
+        }
+
+        .topo-node-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 0.8rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding-bottom: 0.5rem;
+        }
+
+        .topo-node-name {
+            font-size: 1rem;
+            font-weight: 700;
+            color: #fff;
+        }
+
+        .topo-node-sub {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .topo-port-list {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+        }
+
+        .topo-port-socket {
+            position: relative;
+            width: 32px;
+            height: 30px;
+            background: #111520;
+            border: 1px solid #33405a;
+            border-radius: 4px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .topo-port-socket.connected {
+            border-color: var(--accent-green);
+        }
+
+        .topo-port-socket.gigabit {
+            box-shadow: 0 0 10px rgba(0, 230, 118, 0.25);
+        }
+
+        .topo-socket-led {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            margin-bottom: 2px;
+        }
+
+        .topo-socket-label {
+            font-size: 0.58rem;
+            font-family: 'JetBrains Mono', monospace;
+            color: #7b8ba5;
+        }
+
+        .cable-path {
+            fill: none;
+            stroke-width: 5;
+            stroke-linecap: round;
+            filter: drop-shadow(0 2px 5px rgba(0,0,0,0.7));
+            transition: stroke-width 0.2s;
+        }
+
+        .cable-path:hover {
+            stroke-width: 8;
+            cursor: pointer;
+        }
+
+        .cable-glow {
+            fill: none;
+            stroke-width: 1.5;
+            stroke-dasharray: 6 12;
+            animation: dash 1s linear infinite;
+        }
+
+        @keyframes dash {
+            to { stroke-dashoffset: -18; }
+        }
+
+        .cable-label-bubble {
+            position: absolute;
+            background: rgba(14, 18, 28, 0.95);
+            border: 1px solid rgba(0, 230, 118, 0.4);
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.72rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 600;
+            color: #fff;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.6);
+            pointer-events: auto;
+            cursor: pointer;
+            transform: translate(-50%, -50%);
+            white-space: nowrap;
+            transition: all 0.2s;
+            z-index: 4;
+        }
+
+        .cable-label-bubble:hover {
+            transform: translate(-50%, -50%) scale(1.1);
+            border-color: #00d2ff;
+        }
+
+        .btn-open-topo {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: linear-gradient(135deg, rgba(179, 136, 255, 0.2), rgba(0, 210, 255, 0.2));
+            border: 1px solid rgba(179, 136, 255, 0.4);
+            color: #fff;
+            padding: 0.55rem 1.15rem;
+            border-radius: var(--radius-sm);
+            font-family: 'Outfit', sans-serif;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-open-topo:hover {
+            background: linear-gradient(135deg, rgba(179, 136, 255, 0.35), rgba(0, 210, 255, 0.35));
+            border-color: #b388ff;
+            box-shadow: 0 0 15px rgba(179, 136, 255, 0.3);
+            transform: translateY(-1px);
+        }
+
+        /* RESPONSIVE DESIGN PER SMARTPHONE & TABLET */
+        @media (max-width: 960px) {
+            body {
+                padding: 0.4rem;
+            }
+
+            header {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 0.75rem;
+                padding: 0.75rem;
+            }
+
+            .brand {
+                justify-content: flex-start;
+                gap: 8px;
+            }
+
+            .brand-icon {
+                width: 34px;
+                height: 34px;
+            }
+
+            .header-actions {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+
+            .header-actions button {
+                flex: 1 1 calc(50% - 3px);
+                justify-content: center;
+                padding: 0.6rem 0.4rem;
+                font-size: 0.8rem;
+            }
+
+            main {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .switch-rack {
+                width: 100%;
+                gap: 0.85rem;
+            }
+
+            .switch-chassis {
+                padding: 0.75rem;
+                border-radius: var(--radius-sm);
+            }
+
+            .chassis-header {
+                margin-bottom: 0.5rem;
+            }
+
+            .rack-panel {
+                padding: 0.5rem 0.25rem;
+                justify-content: space-around;
+                flex-wrap: wrap;
+                gap: 4px;
+            }
+
+            .port-unit {
+                min-width: 34px;
+                padding: 2px;
+                gap: 3px;
+                flex: 0 0 auto;
+            }
+
+            .rj45-jack {
+                width: 34px;
+                height: 30px;
+                padding: 3px;
+            }
+
+            .rj45-cavity {
+                border-width: 1px;
+            }
+
+            .rj45-pins-row {
+                gap: 1px;
+            }
+
+            .rj45-pin {
+                width: 1px;
+                height: 6px;
+            }
+
+            .port-label {
+                font-size: 0.62rem;
+                letter-spacing: -0.2px;
+            }
+
+            .details-panel {
+                width: 100%;
+                position: static;
+                border-left: none;
+                border-top: 1px solid var(--border-color);
+                padding: 0.75rem 0;
+            }
+
+            .metrics-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 6px;
+            }
+
+            .metric-card {
+                padding: 0.65rem;
+            }
+
+            .metric-val {
+                font-size: 1.15rem;
+            }
+
+            .traffic-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 6px;
+            }
+
+            /* Modale Topologia su Mobile */
+            .modal-overlay {
+                padding: 0.5rem;
+            }
+
+            .modal-header {
+                margin-bottom: 0.75rem;
+                padding-bottom: 0.5rem;
+            }
+
+            .modal-header h2 {
+                font-size: 1.05rem;
+            }
+
+            .topo-canvas-container {
+                overflow: hidden;
+                padding: 0.5rem;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+        }
+
+        @media (max-width: 480px) {
+            header h1 {
+                font-size: 1.1rem;
+            }
+
+            .device-name {
+                font-size: 0.95rem;
+            }
+
+            .device-ip {
+                font-size: 0.68rem;
+            }
+
+            .port-unit {
+                min-width: 32px;
+            }
+
+            .rj45-jack {
+                width: 32px;
+                height: 28px;
+            }
+
+            .port-label {
+                font-size: 0.58rem;
+            }
+
+            .pair-name {
+                font-size: 0.72rem;
+            }
+
+            .pair-status {
+                font-size: 0.72rem;
+            }
+
+            .btn-test {
+                padding: 0.75rem;
+                font-size: 0.8rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <div class="brand">
+            <div class="brand-icon">
+                <svg viewBox="0 0 24 24">
+                    <path d="M4 6h16v4H4V6zm0 8h16v4H4v-4zm2-6h2v-2H6v2zm0 8h2v-2H6v2zm4-8h2v-2h-2v2zm0 8h2v-2h-2v2z" />
+                </svg>
+            </div>
+            <div>
+                <h1>Switch & Cable TDR Radar</h1>
+                <p>Broadcom & Qualcomm PHY Hardware Diagnostics</p>
+            </div>
+        </div>
+        <div class="header-actions">
+            <button class="btn-open-topo" onclick="openTopologyModal()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="18" cy="5" r="3"></circle>
+                    <circle cx="6" cy="12" r="3"></circle>
+                    <circle cx="18" cy="19" r="3"></circle>
+                    <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                    <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+                </svg>
+                Mappa Cavi & Topologia
+            </button>
+            <button class="btn-refresh" id="btn-refresh-all" onclick="refreshAllStatuses()">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M23 4v6h-6M1 20v-6h6" />
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                </svg>
+                Aggiorna LED
+            </button>
+        </div>
+    </header>
+
+    <main>
+        <!-- CONTENITORE DEGLI SWITCH: C7 -> R7000 -> TIM HUB -->
+        <div class="switches-container">
+
+            <!-- 1. TP-LINK ARCHER C7 (TOP) -->
+            <div class="switch-chassis" id="switch-c7">
+                <div class="chassis-header">
+                    <div class="device-info">
+                        <span class="device-badge badge-c7">Main Router</span>
+                        <div class="device-name">TP-Link Archer C7 v2</div>
+                        <div class="device-ip">192.168.1.1 (Qualcomm AR8337)</div>
+                    </div>
+                </div>
+                <div class="rack-panel">
+                    <!-- WAN -->
+                    <div class="port-unit" data-device="c7" data-port="wan" onclick="selectPort('c7', 'wan')">
+                        <div class="led-indicator led-down" id="led-c7-wan"></div>
+                        <div class="rj45-jack">
+                            <div class="rj45-cavity">
+                                <div class="rj45-pins-row">
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                </div>
+                                <div class="rj45-tab-notch"></div>
+                            </div>
+                        </div>
+                        <div class="port-label" style="color:#ff5252;">WAN</div>
+                    </div>
+
+                    <div class="port-group-separator"></div>
+
+                    <!-- LAN 1..4 -->
+                    <div class="port-unit" data-device="c7" data-port="lan1" onclick="selectPort('c7', 'lan1')">
+                        <div class="led-indicator led-down" id="led-c7-lan1"></div>
+                        <div class="rj45-jack">
+                            <div class="rj45-cavity">
+                                <div class="rj45-pins-row">
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                </div>
+                                <div class="rj45-tab-notch"></div>
+                            </div>
+                        </div>
+                        <div class="port-label">LAN 1</div>
+                    </div>
+
+                    <div class="port-unit" data-device="c7" data-port="lan2" onclick="selectPort('c7', 'lan2')">
+                        <div class="led-indicator led-down" id="led-c7-lan2"></div>
+                        <div class="rj45-jack">
+                            <div class="rj45-cavity">
+                                <div class="rj45-pins-row">
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                </div>
+                                <div class="rj45-tab-notch"></div>
+                            </div>
+                        </div>
+                        <div class="port-label">LAN 2</div>
+                    </div>
+
+                    <div class="port-unit" data-device="c7" data-port="lan3" onclick="selectPort('c7', 'lan3')">
+                        <div class="led-indicator led-down" id="led-c7-lan3"></div>
+                        <div class="rj45-jack">
+                            <div class="rj45-cavity">
+                                <div class="rj45-pins-row">
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                </div>
+                                <div class="rj45-tab-notch"></div>
+                            </div>
+                        </div>
+                        <div class="port-label">LAN 3</div>
+                    </div>
+
+                    <div class="port-unit" data-device="c7" data-port="lan4" onclick="selectPort('c7', 'lan4')">
+                        <div class="led-indicator led-down" id="led-c7-lan4"></div>
+                        <div class="rj45-jack">
+                            <div class="rj45-cavity">
+                                <div class="rj45-pins-row">
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                </div>
+                                <div class="rj45-tab-notch"></div>
+                            </div>
+                        </div>
+                        <div class="port-label">LAN 4</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. INTERMEDIATE LAYER 2 SWITCH (8 PORTE) -->
+            <div class="switch-chassis" id="switch-l2switch" style="border-color: rgba(179, 136, 255, 0.25);">
+                <div class="chassis-header">
+                    <div class="device-info">
+                        <span class="device-badge badge-l2">Layer 2 Switch</span>
+                        <div class="device-name">Switch Intermedio Ethernet (Muro)</div>
+                        <div class="device-ip">8-Port Gigabit Desktop Switch</div>
+                    </div>
+                </div>
+                <div class="rack-panel">
+                    <!-- Port 1 -->
+                    <div class="port-unit" data-device="l2switch" data-port="port1" onclick="selectPort('l2switch', 'port1')">
+                        <div class="led-indicator led-down" id="led-l2switch-port1"></div>
+                        <div class="rj45-jack"><div class="rj45-cavity"><div class="rj45-pins-row"><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div></div><div class="rj45-tab-notch"></div></div></div>
+                        <div class="port-label">LAN 1</div>
+                    </div>
+
+                    <!-- Port 2 -->
+                    <div class="port-unit" data-device="l2switch" data-port="port2" onclick="selectPort('l2switch', 'port2')">
+                        <div class="led-indicator led-down" id="led-l2switch-port2"></div>
+                        <div class="rj45-jack"><div class="rj45-cavity"><div class="rj45-pins-row"><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div></div><div class="rj45-tab-notch"></div></div></div>
+                        <div class="port-label">LAN 2</div>
+                    </div>
+
+                    <!-- Port 3 -->
+                    <div class="port-unit" data-device="l2switch" data-port="port3" onclick="selectPort('l2switch', 'port3')">
+                        <div class="led-indicator led-down" id="led-l2switch-port3"></div>
+                        <div class="rj45-jack"><div class="rj45-cavity"><div class="rj45-pins-row"><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div></div><div class="rj45-tab-notch"></div></div></div>
+                        <div class="port-label">LAN 3</div>
+                    </div>
+
+                    <!-- Port 4 -->
+                    <div class="port-unit" data-device="l2switch" data-port="port4" onclick="selectPort('l2switch', 'port4')">
+                        <div class="led-indicator led-down" id="led-l2switch-port4"></div>
+                        <div class="rj45-jack"><div class="rj45-cavity"><div class="rj45-pins-row"><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div></div><div class="rj45-tab-notch"></div></div></div>
+                        <div class="port-label">LAN 4</div>
+                    </div>
+
+                    <!-- Port 5 -->
+                    <div class="port-unit" data-device="l2switch" data-port="port5" onclick="selectPort('l2switch', 'port5')">
+                        <div class="led-indicator led-down" id="led-l2switch-port5"></div>
+                        <div class="rj45-jack"><div class="rj45-cavity"><div class="rj45-pins-row"><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div></div><div class="rj45-tab-notch"></div></div></div>
+                        <div class="port-label">LAN 5</div>
+                    </div>
+
+                    <!-- Port 6 -->
+                    <div class="port-unit" data-device="l2switch" data-port="port6" onclick="selectPort('l2switch', 'port6')">
+                        <div class="led-indicator led-down" id="led-l2switch-port6"></div>
+                        <div class="rj45-jack"><div class="rj45-cavity"><div class="rj45-pins-row"><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div></div><div class="rj45-tab-notch"></div></div></div>
+                        <div class="port-label">LAN 6</div>
+                    </div>
+
+                    <!-- Port 7 -->
+                    <div class="port-unit" data-device="l2switch" data-port="port7" onclick="selectPort('l2switch', 'port7')">
+                        <div class="led-indicator led-down" id="led-l2switch-port7"></div>
+                        <div class="rj45-jack"><div class="rj45-cavity"><div class="rj45-pins-row"><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div></div><div class="rj45-tab-notch"></div></div></div>
+                        <div class="port-label">LAN 7</div>
+                    </div>
+
+                    <!-- Port 8 -->
+                    <div class="port-unit" data-device="l2switch" data-port="port8" onclick="selectPort('l2switch', 'port8')">
+                        <div class="led-indicator led-down" id="led-l2switch-port8"></div>
+                        <div class="rj45-jack"><div class="rj45-cavity"><div class="rj45-pins-row"><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div><div class="rj45-pin"></div></div><div class="rj45-tab-notch"></div></div></div>
+                        <div class="port-label">LAN 8</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. NETGEAR R7000 (CENTER) -->
+            <div class="switch-chassis" id="switch-r7000">
+                <div class="chassis-header">
+                    <div class="device-info">
+                        <span class="device-badge badge-r7000">Core NVR</span>
+                        <div class="device-name">Netgear Nighthawk R7000</div>
+                        <div class="device-ip">192.168.1.162 (BCM53012)</div>
+                    </div>
+                </div>
+                <div class="rack-panel">
+                    <!-- WAN -->
+                    <div class="port-unit" data-device="r7000" data-port="wan" onclick="selectPort('r7000', 'wan')">
+                        <div class="led-indicator led-down" id="led-r7000-wan"></div>
+                        <div class="rj45-jack">
+                            <div class="rj45-cavity">
+                                <div class="rj45-pins-row">
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                </div>
+                                <div class="rj45-tab-notch"></div>
+                            </div>
+                        </div>
+                        <div class="port-label" style="color:#ff5252;">WAN</div>
+                    </div>
+
+                    <div class="port-group-separator"></div>
+
+                    <!-- LAN 1..4 -->
+                    <div class="port-unit" data-device="r7000" data-port="lan1" onclick="selectPort('r7000', 'lan1')">
+                        <div class="led-indicator led-down" id="led-r7000-lan1"></div>
+                        <div class="rj45-jack">
+                            <div class="rj45-cavity">
+                                <div class="rj45-pins-row">
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                </div>
+                                <div class="rj45-tab-notch"></div>
+                            </div>
+                        </div>
+                        <div class="port-label">LAN 1</div>
+                    </div>
+
+                    <div class="port-unit" data-device="r7000" data-port="lan2" onclick="selectPort('r7000', 'lan2')">
+                        <div class="led-indicator led-down" id="led-r7000-lan2"></div>
+                        <div class="rj45-jack">
+                            <div class="rj45-cavity">
+                                <div class="rj45-pins-row">
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                </div>
+                                <div class="rj45-tab-notch"></div>
+                            </div>
+                        </div>
+                        <div class="port-label">LAN 2</div>
+                    </div>
+
+                    <div class="port-unit" data-device="r7000" data-port="lan3" onclick="selectPort('r7000', 'lan3')">
+                        <div class="led-indicator led-down" id="led-r7000-lan3"></div>
+                        <div class="rj45-jack">
+                            <div class="rj45-cavity">
+                                <div class="rj45-pins-row">
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                </div>
+                                <div class="rj45-tab-notch"></div>
+                            </div>
+                        </div>
+                        <div class="port-label">LAN 3</div>
+                    </div>
+
+                    <div class="port-unit" data-device="r7000" data-port="lan4" onclick="selectPort('r7000', 'lan4')">
+                        <div class="led-indicator led-down" id="led-r7000-lan4"></div>
+                        <div class="rj45-jack">
+                            <div class="rj45-cavity">
+                                <div class="rj45-pins-row">
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                </div>
+                                <div class="rj45-tab-notch"></div>
+                            </div>
+                        </div>
+                        <div class="port-label">LAN 4</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3. TIM HUB (BOTTOM) -->
+            <div class="switch-chassis" id="switch-timhub">
+                <div class="chassis-header">
+                    <div class="device-info">
+                        <span class="device-badge badge-timhub">Gateway Lab</span>
+                        <div class="device-name">TIM HUB (DGA4132)</div>
+                        <div class="device-ip">192.168.3.2 (BCM63138 Starfighter)</div>
+                    </div>
+                </div>
+                <div class="rack-panel">
+                    <!-- WAN (eth4) -->
+                    <div class="port-unit" data-device="timhub" data-port="eth4" onclick="selectPort('timhub', 'eth4')">
+                        <div class="led-indicator led-down" id="led-timhub-eth4"></div>
+                        <div class="rj45-jack">
+                            <div class="rj45-cavity">
+                                <div class="rj45-pins-row">
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                </div>
+                                <div class="rj45-tab-notch"></div>
+                            </div>
+                        </div>
+                        <div class="port-label" style="color:#ff5252;">WAN</div>
+                    </div>
+
+                    <div class="port-group-separator"></div>
+
+                    <!-- LAN 1..3 (eth0, eth1, eth2) -->
+                    <div class="port-unit" data-device="timhub" data-port="eth0" onclick="selectPort('timhub', 'eth0')">
+                        <div class="led-indicator led-down" id="led-timhub-eth0"></div>
+                        <div class="rj45-jack">
+                            <div class="rj45-cavity">
+                                <div class="rj45-pins-row">
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                </div>
+                                <div class="rj45-tab-notch"></div>
+                            </div>
+                        </div>
+                        <div class="port-label">LAN 1</div>
+                    </div>
+
+                    <div class="port-unit" data-device="timhub" data-port="eth1" onclick="selectPort('timhub', 'eth1')">
+                        <div class="led-indicator led-down" id="led-timhub-eth1"></div>
+                        <div class="rj45-jack">
+                            <div class="rj45-cavity">
+                                <div class="rj45-pins-row">
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                </div>
+                                <div class="rj45-tab-notch"></div>
+                            </div>
+                        </div>
+                        <div class="port-label">LAN 2</div>
+                    </div>
+
+                    <div class="port-unit" data-device="timhub" data-port="eth2" onclick="selectPort('timhub', 'eth2')">
+                        <div class="led-indicator led-down" id="led-timhub-eth2"></div>
+                        <div class="rj45-jack">
+                            <div class="rj45-cavity">
+                                <div class="rj45-pins-row">
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                </div>
+                                <div class="rj45-tab-notch"></div>
+                            </div>
+                        </div>
+                        <div class="port-label">LAN 3</div>
+                    </div>
+
+                    <div class="port-unit" data-device="timhub" data-port="eth3" onclick="selectPort('timhub', 'eth3')">
+                        <div class="led-indicator led-down" id="led-timhub-eth3"></div>
+                        <div class="rj45-jack">
+                            <div class="rj45-cavity">
+                                <div class="rj45-pins-row">
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                    <div class="rj45-pin"></div>
+                                </div>
+                                <div class="rj45-tab-notch"></div>
+                            </div>
+                        </div>
+                        <div class="port-label">LAN 4</div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- PANNELLO DETTAGLIO PORTA SELEZIONATA -->
+        <div class="details-panel" id="details-panel">
+            <div class="empty-selection" id="empty-state">
+                <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 12h14M12 5l7 7-7 7" />
+                </svg>
+                <h3>Seleziona una Porta</h3>
+                <p>Clicca su una porta RJ45 di uno switch per eseguire la diagnostica e misurare il cavo.</p>
+            </div>
+
+            <div id="active-state" style="display:none; flex-direction:column; gap:1.5rem;">
+                <div class="panel-header">
+                    <div class="panel-title">
+                        <h2 id="det-port-title">Porta Selezionata</h2>
+                        <p id="det-dev-subtitle">Dispositivo</p>
+                    </div>
+                    <div class="port-status-badge status-down" id="det-status-badge">DOWN</div>
+                </div>
+
+                <!-- TDR RADAR CARD -->
+                <div class="tdr-card" id="tdr-section">
+                    <div class="card-title">
+                        <span>Riflettometria TDR Cavo</span>
+                        <span id="tdr-chip-label" style="font-size:0.7rem; color:var(--text-muted);">Broadcom
+                            CableChecker™</span>
+                    </div>
+
+                    <div class="loader-radar" id="radar-loader">
+                        <div class="radar-pulse"></div>
+                        <span>Scansione riflettometrica TDR...</span>
+                    </div>
+
+                    <div class="pairs-list" id="pairs-container">
+                        <!-- Coppia A -->
+                        <div class="pair-item">
+                            <div class="pair-info">
+                                <span class="pair-name">Coppia A (Pin 1-2)</span>
+                                <span class="pair-status" id="stat-pair-a">--</span>
+                            </div>
+                            <div class="pair-bar-bg">
+                                <div class="pair-bar-fill bar-ok" id="bar-pair-a" style="width:0%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- Coppia B -->
+                        <div class="pair-item">
+                            <div class="pair-info">
+                                <span class="pair-name">Coppia B (Pin 3-6)</span>
+                                <span class="pair-status" id="stat-pair-b">--</span>
+                            </div>
+                            <div class="pair-bar-bg">
+                                <div class="pair-bar-fill bar-ok" id="bar-pair-b" style="width:0%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- Coppia C -->
+                        <div class="pair-item">
+                            <div class="pair-info">
+                                <span class="pair-name">Coppia C (Pin 4-5)</span>
+                                <span class="pair-status" id="stat-pair-c">--</span>
+                            </div>
+                            <div class="pair-bar-bg">
+                                <div class="pair-bar-fill bar-ok" id="bar-pair-c" style="width:0%;"></div>
+                            </div>
+                        </div>
+
+                        <!-- Coppia D -->
+                        <div class="pair-item">
+                            <div class="pair-info">
+                                <span class="pair-name">Coppia D (Pin 7-8)</span>
+                                <span class="pair-status" id="stat-pair-d">--</span>
+                            </div>
+                            <div class="pair-bar-bg">
+                                <div class="pair-bar-fill bar-ok" id="bar-pair-d" style="width:0%;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- METRICHE FISICHE & DSP -->
+                <div class="metrics-grid">
+                    <div class="metric-box">
+                        <div class="metric-label">Margine SNR</div>
+                        <div class="metric-value" id="val-snr">-- dB</div>
+                        <div class="metric-desc" id="desc-snr">Rapporto S/N</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-label">Pair Skew</div>
+                        <div class="metric-value" id="val-skew">-- ns</div>
+                        <div class="metric-desc">Sfasamento temporale</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-label">Idle Errors (Reg 10)</div>
+                        <div class="metric-value" id="val-idle">0</div>
+                        <div class="metric-desc">Errori sincronizzazione</div>
+                    </div>
+                    <div class="metric-box">
+                        <div class="metric-label">MDI / MDI-X</div>
+                        <div class="metric-value" id="val-mdix">--</div>
+                        <div class="metric-desc" id="desc-pol">Polarità: OK</div>
+                    </div>
+                </div>
+
+                <!-- AZIONI -->
+                <button class="btn-test" id="btn-run-tdr" onclick="runTdrMeasurement()">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path
+                            d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                    </svg>
+                    Esegui Impulso TDR di Precisione
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const API_URL = '/cgi-bin/network_diag.py';
+        let currentSelected = { device: null, port: null };
+
+        // Aggiorna lo stato dei LED di tutti gli switch
+        async function refreshAllStatuses() {
+            const btn = document.getElementById('btn-refresh-all');
+            btn.classList.add('spinning');
+
+            try {
+                const res = await fetch(`${API_URL}?action=status_all&t=${Date.now()}`);
+                const json = await res.json();
+
+                if (json.success && json.data) {
+                    const d = json.data;
+                    updateLedsForDevice('r7000', d.r7000);
+                    updateLedsForDevice('timhub', d.timhub);
+                    updateLedsForDevice('c7', d.c7);
+                    updateLedsForDevice('l2switch', d.l2switch);
+                }
+            } catch (err) {
+                console.error("Errore refresh status:", err);
+            } finally {
+                btn.classList.remove('spinning');
+            }
+        }
+
+        function updateLedsForDevice(device, portsMap) {
+            if (!portsMap) return;
+            for (const [port, info] of Object.entries(portsMap)) {
+                const led = document.getElementById(`led-${device}-${port}`);
+                if (!led) continue;
+
+                led.className = 'led-indicator';
+                if (!info.link) {
+                    led.classList.add('led-down');
+                } else if (info.speed >= 1000) {
+                    led.classList.add('led-1000');
+                } else {
+                    led.classList.add('led-100');
+                }
+            }
+        }
+
+        // Selezione porta al click
+        async function selectPort(device, port) {
+            currentSelected = { device, port };
+
+            document.querySelectorAll('.port-unit').forEach(el => el.classList.remove('active'));
+            const activeEl = document.querySelector(`.port-unit[data-device="${device}"][data-port="${port}"]`);
+            if (activeEl) activeEl.classList.add('active');
+
+            document.getElementById('empty-state').style.display = 'none';
+            const activeState = document.getElementById('active-state');
+            activeState.style.display = 'flex';
+
+            const devNames = {
+                c7: 'TP-Link Archer C7 v2 (192.168.1.1)',
+                l2switch: 'Switch Intermedio Layer 2 (Muro)',
+                r7000: 'Netgear Nighthawk R7000 (192.168.1.162)',
+                timhub: 'TIM HUB DGA4132 (192.168.3.2)'
+            };
+
+            document.getElementById('det-port-title').textContent = `${port.toUpperCase()}`;
+            document.getElementById('det-dev-subtitle').textContent = devNames[device] || device;
+
+            // Se siamo su smartphone o schermo stretto, scorri dolcemente al pannello dettagli
+            if (window.innerWidth <= 960) {
+                setTimeout(() => {
+                    document.getElementById('details-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 100);
+            }
+
+            await loadPortDetails(device, port);
+        }
+
+        async function loadPortDetails(device, port, unit = 'm') {
+            const loader = document.getElementById('radar-loader');
+            const pairsCont = document.getElementById('pairs-container');
+            loader.style.display = 'flex';
+            pairsCont.style.opacity = '0.3';
+
+            try {
+                const reqUnit = (device === 'r7000') ? 'cm' : unit;
+                const res = await fetch(`${API_URL}?device=${device}&port=${port}&unit=${reqUnit}&t=${Date.now()}`);
+                const resJson = await res.json();
+
+                if (resJson.success && resJson.data) {
+                    renderDetails(resJson.data, device);
+                } else {
+                    document.getElementById('det-status-badge').className = 'port-status-badge status-down';
+                    document.getElementById('det-status-badge').textContent = 'TIMEOUT O ERRORE';
+                    console.warn("Errore lettura:", resJson.error);
+                }
+            } catch (err) {
+                console.error("Errore fetch dettagli:", err);
+            } finally {
+                loader.style.display = 'none';
+                pairsCont.style.opacity = '1';
+            }
+        }
+
+        function renderDetails(data, device) {
+            // 1. Badge di stato
+            const badge = document.getElementById('det-status-badge');
+            if (!data.link || !data.link.is_up) {
+                badge.className = 'port-status-badge status-down';
+                badge.textContent = 'LINK DOWN';
+            } else if (data.link.speed_mbps >= 1000) {
+                badge.className = 'port-status-badge status-up-1000';
+                badge.textContent = `1000M ${data.link.duplex.toUpperCase()}`;
+            } else {
+                badge.className = 'port-status-badge status-up-100';
+                badge.textContent = `${data.link.speed_mbps}M ${data.link.duplex.toUpperCase()}`;
+            }
+
+            // 2. Metriche DSP & Qualità Segnale
+            const dsp = data.dsp || {};
+            const sig = data.signal_integrity || {};
+            const isUp = data.link && data.link.is_up;
+
+            const snrEl = document.getElementById('val-snr');
+            const snrDescEl = document.getElementById('desc-snr');
+
+            if (device === 'l2switch') {
+                const cInfo = data.connected_info || {};
+                document.getElementById('det-port-title').textContent = `${cInfo.name || data.interface.toUpperCase()} (Switch L2)`;
+                document.getElementById('det-dev-subtitle').textContent = cInfo.connected_to || 'Switch Intermedio 8-Port';
+
+                snrEl.textContent = isUp ? `${data.dsp.snr_db} dB` : 'Porta Down';
+                snrDescEl.textContent = isUp ? (data.dsp.snr_db >= 25 ? 'Qualità Eccellente' : 'Qualità Buona') : 'Cavo non collegato';
+
+                const skewEl = document.getElementById('val-skew');
+                skewEl.textContent = isUp ? `~${data.dsp.pair_skew_ns} ns` : '--';
+
+                document.getElementById('val-idle').textContent = data.signal_integrity.idle_errors || 0;
+                document.getElementById('val-mdix').textContent = 'Auto MDI';
+                document.getElementById('desc-pol').textContent = cInfo.device_mac ? `MAC: ${cInfo.device_mac}` : 'Polarità: Auto';
+
+                document.getElementById('tdr-chip-label').textContent = 'Riflettometria & Diagnostica Tratta';
+                document.getElementById('btn-run-tdr').style.display = 'none';
+
+                if (data.tdr) {
+                    const unitLabel = data.unit || 'm';
+                    renderTdrPair('a', data.tdr.pair_a, unitLabel);
+                    renderTdrPair('b', data.tdr.pair_b, unitLabel);
+                    renderTdrPair('c', data.tdr.pair_c, unitLabel);
+                    renderTdrPair('d', data.tdr.pair_d, unitLabel);
+                }
+
+                // Traffico
+                const tr = data.traffic_counters || {};
+                document.getElementById('cnt-rx-pkts').textContent = formatPkts(tr.rx_packets || 0);
+                document.getElementById('cnt-rx-errs').textContent = tr.rx_errors || 0;
+                document.getElementById('cnt-tx-pkts').textContent = formatPkts(tr.tx_packets || 0);
+                document.getElementById('cnt-tx-errs').textContent = tr.tx_errors || 0;
+                return;
+            }
+
+            if (!isUp) {
+                snrEl.textContent = 'Porta Down';
+                snrDescEl.textContent = 'Cavo non collegato';
+            } else if (dsp.snr_db !== undefined && dsp.snr_db > 0) {
+                snrEl.textContent = `${dsp.snr_db} dB`;
+                snrDescEl.textContent = dsp.snr_db >= 25 ? 'Qualità Eccellente' : (dsp.snr_db >= 18 ? 'Qualità Buona' : 'Margine Basso');
+            } else if (device === 'c7') {
+                snrEl.textContent = sig.local_rx_ok ? 'Agganciato' : 'Non Agganciato';
+                snrDescEl.textContent = 'PHY Qualcomm (Zero Errori)';
+            } else {
+                snrEl.textContent = sig.local_rx_ok ? '28 dB' : 'N/D';
+                snrDescEl.textContent = 'Phase Lock OK';
+            }
+
+            const skewEl = document.getElementById('val-skew');
+            if (!isUp) {
+                skewEl.textContent = '--';
+            } else if (device === 'c7') {
+                skewEl.textContent = 'Auto (IEEE)';
+            } else if (dsp.pair_skew_ns !== undefined) {
+                skewEl.textContent = `~${dsp.pair_skew_ns} ns`;
+            } else {
+                skewEl.textContent = 'N/D';
+            }
+
+            document.getElementById('val-idle').textContent = (sig.idle_errors !== undefined) ? sig.idle_errors : 0;
+            document.getElementById('val-mdix').textContent = (data.link && data.link.mdix) ? 'MDI-X' : 'MDI';
+            document.getElementById('desc-pol').textContent = dsp.polarity_swap ? 'Polarità: Invertita' : 'Polarità: Dritta (+/-)';
+
+            // 3. TDR Card
+            const tdrSection = document.getElementById('tdr-section');
+            const btnTdr = document.getElementById('btn-run-tdr');
+
+            if (device === 'c7') {
+                document.getElementById('tdr-chip-label').textContent = 'Stima Attenuazione DSP (Qualcomm)';
+                btnTdr.style.display = 'none';
+                if (data.tdr) {
+                    renderTdrPair('a', data.tdr.pair_a, 'm');
+                    renderTdrPair('b', data.tdr.pair_b, 'm');
+                    renderTdrPair('c', data.tdr.pair_c, 'm');
+                    renderTdrPair('d', data.tdr.pair_d, 'm');
+                }
+            } else {
+                document.getElementById('tdr-chip-label').textContent = 'Broadcom CableChecker™';
+                btnTdr.style.display = 'flex';
+                if (data.tdr) {
+                    const unitLabel = data.unit || (device === 'r7000' ? 'cm' : 'm');
+                    renderTdrPair('a', data.tdr.pair_a, unitLabel);
+                    renderTdrPair('b', data.tdr.pair_b, unitLabel);
+                    renderTdrPair('c', data.tdr.pair_c, unitLabel);
+                    renderTdrPair('d', data.tdr.pair_d, unitLabel);
+                }
+            }
+        }
+
+        function renderTdrPair(pKey, pData, unit = 'm') {
+            if (!pData) return;
+            const statEl = document.getElementById(`stat-pair-${pKey}`);
+            const barEl = document.getElementById(`bar-pair-${pKey}`);
+            if (!statEl || !barEl) return;
+
+            const lenVal = (pData.length !== undefined) ? pData.length : (pData.length_m !== undefined ? pData.length_m : 0);
+            let label = (pData.status || "N/D").toUpperCase();
+            let barClass = 'bar-ok';
+            let statClass = 'status-ok';
+
+            if (pData.status === 'open') {
+                label = `APERTO a ${lenVal} ${unit}`;
+                barClass = 'bar-open';
+                statClass = 'status-open';
+            } else if (pData.status && pData.status.includes('short')) {
+                label = `CORTO a ${lenVal} ${unit}`;
+                barClass = 'bar-short';
+                statClass = 'status-short';
+            } else if (pData.status === 'ok') {
+                label = `OK (${lenVal} ${unit})`;
+                barClass = 'bar-ok';
+                statClass = 'status-ok';
+            } else if (pData.status === 'invalid') {
+                label = `ATTIVO / DISTURBO`;
+                barClass = 'bar-open';
+                statClass = 'status-open';
+            }
+
+            statEl.textContent = label;
+            statEl.className = `pair-status ${statClass}`;
+            barEl.className = `pair-bar-fill ${barClass}`;
+
+            const maxRef = unit === 'cm' ? 2500 : 25;
+            const pct = Math.min(100, Math.max(8, (lenVal / maxRef) * 100));
+            barEl.style.width = `${pct}%`;
+        }
+
+        function renderEmptyTdr() {
+            ['a', 'b', 'c', 'd'].forEach(k => {
+                document.getElementById(`stat-pair-${k}`).textContent = 'N/D (Qualcomm)';
+                document.getElementById(`stat-pair-${k}`).className = 'pair-status';
+                document.getElementById(`bar-pair-${k}`).style.width = '0%';
+            });
+        }
+
+        function runTdrMeasurement() {
+            if (!currentSelected.device || !currentSelected.port) return;
+            const unit = currentSelected.device === 'r7000' ? 'cm' : 'm';
+            loadPortDetails(currentSelected.device, currentSelected.port, unit);
+        }
+
+        // --- GESTIONE TOPOLOGIA CAVI FISICI ---
+        function openTopologyModal() {
+            document.getElementById('topology-modal').classList.add('open');
+            setTimeout(drawTopologyCables, 50);
+        }
+
+        function closeTopologyModal() {
+            document.getElementById('topology-modal').classList.remove('open');
+        }
+
+        function drawTopologyCables() {
+            const svg = document.getElementById('topo-svg');
+            const container = document.getElementById('topo-nodes-wrapper');
+            const canvasContainer = document.querySelector('.topo-canvas-container');
+            if (!svg || !container || !canvasContainer) return;
+
+            // Auto-scaling per smartphone e schermi stretti
+            const availW = canvasContainer.clientWidth - 16;
+            const availH = canvasContainer.clientHeight - 16;
+            const targetW = 1200;
+            const targetH = 720;
+            
+            if (availW < targetW) {
+                const scale = Math.min(availW / targetW, availH / targetH);
+                container.style.transform = `scale(${scale})`;
+                container.style.transformOrigin = 'center center';
+            } else {
+                container.style.transform = 'none';
+            }
+
+            const rectCont = container.getBoundingClientRect();
+            svg.setAttribute('viewBox', `0 0 ${targetW} ${targetH}`);
+
+            // Cavi fisici reali da connettere
+            const connections = [
+                {
+                    from: 'sock-c7-lan2',
+                    to: 'sock-l2-p6',
+                    color: '#00e676',
+                    glow: '#b9f6ca',
+                    label: 'Cavo Muro (~10-15m Cat6) • 1000M',
+                    type: 'wall'
+                },
+                {
+                    from: 'sock-l2-p5',
+                    to: 'sock-r7-lan1',
+                    color: '#00d2ff',
+                    glow: '#80d8ff',
+                    label: 'Patch Cord (182 cm TDR) • 1000M',
+                    type: 'patch'
+                },
+                {
+                    from: 'sock-l2-p4',
+                    to: 'sock-tv-lan',
+                    color: '#ffab00',
+                    glow: '#ffe57f',
+                    label: 'Cavo TV Cucina • 100M',
+                    type: 'device'
+                },
+                {
+                    from: 'sock-c7-lan4',
+                    to: 'sock-tim-lan1',
+                    color: '#b388ff',
+                    glow: '#ea80fc',
+                    label: 'Link TIM HUB • 1000M',
+                    type: 'inter'
+                }
+            ];
+
+            let svgContent = `
+                <defs>
+                    <linearGradient id="grad-wall" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#00e676" />
+                        <stop offset="100%" stop-color="#00b0ff" />
+                    </linearGradient>
+                    <linearGradient id="grad-patch" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stop-color="#00d2ff" />
+                        <stop offset="100%" stop-color="#7c4dff" />
+                    </linearGradient>
+                </defs>
+            `;
+
+            // Rimuovi vecchie bolle etichette
+            document.querySelectorAll('.cable-label-bubble').forEach(e => e.remove());
+
+            connections.forEach((conn, idx) => {
+                const elFrom = document.getElementById(conn.from);
+                const elTo = document.getElementById(conn.to);
+                if (!elFrom || !elTo) return;
+
+                const rFrom = elFrom.getBoundingClientRect();
+                const rTo = elTo.getBoundingClientRect();
+
+                const x1 = (rFrom.left + rFrom.width / 2) - rectCont.left;
+                const y1 = (rFrom.top + rFrom.height / 2) - rectCont.top;
+                const x2 = (rTo.left + rTo.width / 2) - rectCont.left;
+                const y2 = (rTo.top + rTo.height / 2) - rectCont.top;
+
+                // Calcolo curva di Bézier morbida
+                const dx = Math.abs(x2 - x1) * 0.5;
+                const dy = (y2 - y1) * 0.5;
+                const cx1 = x1 + (x2 > x1 ? dx : -dx);
+                const cy1 = y1 + dy * 0.2;
+                const cx2 = x2 - (x2 > x1 ? dx : -dx);
+                const cy2 = y2 - dy * 0.2;
+
+                const pathD = `M ${x1} ${y1} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${x2} ${y2}`;
+
+                // Cavo principale esterno
+                svgContent += `<path d="${pathD}" stroke="${conn.color}" class="cable-path" stroke-opacity="0.85" />`;
+                // Flusso luminoso animato
+                svgContent += `<path d="${pathD}" stroke="${conn.glow}" class="cable-glow" />`;
+
+                // Etichetta a metà percorso
+                const midX = (x1 + x2) / 2;
+                const midY = (y1 + y2) / 2;
+
+                const bubble = document.createElement('div');
+                bubble.className = 'cable-label-bubble';
+                bubble.style.left = `${midX}px`;
+                bubble.style.top = `${midY}px`;
+                bubble.textContent = conn.label;
+                container.appendChild(bubble);
+            });
+
+            svg.innerHTML = svgContent;
+        }
+
+        window.addEventListener('resize', () => {
+            if (document.getElementById('topology-modal').classList.contains('open')) {
+                drawTopologyCables();
+            }
+        });
+
+        // Avvio: carica lo stato di tutti i LED
+        window.addEventListener('DOMContentLoaded', () => {
+            refreshAllStatuses();
+            setInterval(refreshAllStatuses, 10000);
+        });
+    </script>
+
+    <!-- MODALE OVERLAY TOPOLOGIA CAVI FISICI -->
+    <div class="modal-overlay" id="topology-modal">
+        <div class="modal-header">
+            <div class="modal-title-group">
+                <h2>
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#00e676" stroke-width="2">
+                        <circle cx="18" cy="5" r="3"></circle>
+                        <circle cx="6" cy="12" r="3"></circle>
+                        <circle cx="18" cy="19" r="3"></circle>
+                        <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                        <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+                    </svg>
+                    Mappa Topologia Cavi Fisici di Rete
+                </h2>
+                <p>Tracciato reale dei collegamenti Ethernet cablati tra gli apparati e misure TDR radar</p>
+            </div>
+            <button class="btn-close-modal" onclick="closeTopologyModal()" title="Chiudi">✕</button>
+        </div>
+
+        <div class="topo-canvas-container">
+            <div class="topo-nodes-wrapper" id="topo-nodes-wrapper">
+                <!-- SVG LAYER PER I CAVI -->
+                <svg class="topo-svg-layer" id="topo-svg"></svg>
+
+                <!-- 1. ARCHER C7 (IN ALTO A SINISTRA) -->
+                <div class="topo-node" style="top: 40px; left: 40px; width: 330px;">
+                    <div class="topo-node-header">
+                        <span class="device-badge badge-c7">Router Principale</span>
+                        <div>
+                            <div class="topo-node-name">TP-Link Archer C7 v2</div>
+                            <div class="topo-node-sub">192.168.1.1 (Qualcomm AR8337)</div>
+                        </div>
+                    </div>
+                    <div class="topo-port-list">
+                        <div class="topo-port-socket"><div class="topo-socket-led" style="background:#ff5252;"></div><div class="topo-socket-label">WAN</div></div>
+                        <div class="topo-port-socket"><div class="topo-socket-led" style="background:#ffab00;"></div><div class="topo-socket-label">LAN 1</div></div>
+                        <div class="topo-port-socket connected gigabit" id="sock-c7-lan2"><div class="topo-socket-led" style="background:#00e676;"></div><div class="topo-socket-label">LAN 2</div></div>
+                        <div class="topo-port-socket connected gigabit"><div class="topo-socket-led" style="background:#00e676;"></div><div class="topo-socket-label">LAN 3</div></div>
+                        <div class="topo-port-socket connected gigabit" id="sock-c7-lan4"><div class="topo-socket-led" style="background:#00e676;"></div><div class="topo-socket-label">LAN 4</div></div>
+                    </div>
+                </div>
+
+                <!-- 2. SWITCH INTERMEDIO L2 A 8 PORTE (AL CENTRO) -->
+                <div class="topo-node" style="top: 260px; left: 420px; width: 380px; border-color: rgba(179, 136, 255, 0.4);">
+                    <div class="topo-node-header">
+                        <span class="device-badge badge-l2">Switch Muro</span>
+                        <div>
+                            <div class="topo-node-name">Switch Layer 2 (8 Porte)</div>
+                            <div class="topo-node-sub">Dispositivo Intermedio Ethernet</div>
+                        </div>
+                    </div>
+                    <div class="topo-port-list">
+                        <div class="topo-port-socket"><div class="topo-socket-led" style="background:#33405a;"></div><div class="topo-socket-label">P1</div></div>
+                        <div class="topo-port-socket"><div class="topo-socket-led" style="background:#33405a;"></div><div class="topo-socket-label">P2</div></div>
+                        <div class="topo-port-socket"><div class="topo-socket-led" style="background:#33405a;"></div><div class="topo-socket-label">P3</div></div>
+                        <div class="topo-port-socket connected" id="sock-l2-p4"><div class="topo-socket-led" style="background:#ffab00;"></div><div class="topo-socket-label">P4</div></div>
+                        <div class="topo-port-socket connected gigabit" id="sock-l2-p5"><div class="topo-socket-led" style="background:#00d2ff;"></div><div class="topo-socket-label">P5</div></div>
+                        <div class="topo-port-socket connected gigabit" id="sock-l2-p6"><div class="topo-socket-led" style="background:#00e676;"></div><div class="topo-socket-label">P6</div></div>
+                        <div class="topo-port-socket"><div class="topo-socket-led" style="background:#33405a;"></div><div class="topo-socket-label">P7</div></div>
+                        <div class="topo-port-socket"><div class="topo-socket-led" style="background:#33405a;"></div><div class="topo-socket-label">P8</div></div>
+                    </div>
+                </div>
+
+                <!-- 3. NETGEAR R7000 (IN BASSO A SINISTRA) -->
+                <div class="topo-node" style="top: 480px; left: 40px; width: 330px;">
+                    <div class="topo-node-header">
+                        <span class="device-badge badge-r7000">Core NVR</span>
+                        <div>
+                            <div class="topo-node-name">Netgear Nighthawk R7000</div>
+                            <div class="topo-node-sub">192.168.1.162 (BCM53012 TDR)</div>
+                        </div>
+                    </div>
+                    <div class="topo-port-list">
+                        <div class="topo-port-socket"><div class="topo-socket-led" style="background:#33405a;"></div><div class="topo-socket-label">WAN</div></div>
+                        <div class="topo-port-socket connected gigabit" id="sock-r7-lan1"><div class="topo-socket-led" style="background:#00d2ff;"></div><div class="topo-socket-label">LAN 1</div></div>
+                        <div class="topo-port-socket"><div class="topo-socket-led" style="background:#33405a;"></div><div class="topo-socket-label">LAN 2</div></div>
+                        <div class="topo-port-socket"><div class="topo-socket-led" style="background:#33405a;"></div><div class="topo-socket-label">LAN 3</div></div>
+                        <div class="topo-port-socket"><div class="topo-socket-led" style="background:#33405a;"></div><div class="topo-socket-label">LAN 4</div></div>
+                    </div>
+                </div>
+
+                <!-- 4. TIM HUB DGA4132 (IN ALTO A DESTRA) -->
+                <div class="topo-node" style="top: 40px; left: 860px; width: 310px;">
+                    <div class="topo-node-header">
+                        <span class="device-badge badge-timhub">Gateway Lab</span>
+                        <div>
+                            <div class="topo-node-name">TIM HUB (DGA4132)</div>
+                            <div class="topo-node-sub">192.168.3.2 (BCM63138)</div>
+                        </div>
+                    </div>
+                    <div class="topo-port-list">
+                        <div class="topo-port-socket"><div class="topo-socket-led" style="background:#ff5252;"></div><div class="topo-socket-label">WAN</div></div>
+                        <div class="topo-port-socket connected gigabit" id="sock-tim-lan1"><div class="topo-socket-led" style="background:#00e676;"></div><div class="topo-socket-label">LAN 1</div></div>
+                        <div class="topo-port-socket"><div class="topo-socket-led" style="background:#33405a;"></div><div class="topo-socket-label">LAN 2</div></div>
+                        <div class="topo-port-socket"><div class="topo-socket-led" style="background:#33405a;"></div><div class="topo-socket-label">LAN 3</div></div>
+                        <div class="topo-port-socket"><div class="topo-socket-led" style="background:#33405a;"></div><div class="topo-socket-label">LAN 4</div></div>
+                    </div>
+                </div>
+
+                <!-- 5. SMART TV CUCINA (IN BASSO A DESTRA) -->
+                <div class="topo-node" style="top: 480px; left: 860px; width: 260px; border-color: rgba(255, 171, 0, 0.3);">
+                    <div class="topo-node-header">
+                        <span class="device-badge" style="background:rgba(255,171,0,0.15); color:#ffab00; border:1px solid rgba(255,171,0,0.3);">Client TV</span>
+                        <div>
+                            <div class="topo-node-name">Smart TV Cucina</div>
+                            <div class="topo-node-sub">192.168.1.130 (100BT)</div>
+                        </div>
+                    </div>
+                    <div class="topo-port-list">
+                        <div class="topo-port-socket connected" id="sock-tv-lan"><div class="topo-socket-led" style="background:#ffab00;"></div><div class="topo-socket-label">ETH</div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>

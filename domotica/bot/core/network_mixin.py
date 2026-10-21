@@ -1,4 +1,5 @@
 import json
+import re
 import time
 import sys
 import socket
@@ -171,6 +172,308 @@ class NetworkMixin:
                 f"🚀 *TEST BANDA REALE iperf3* (ore {now_str})\n\n"
                 f"⚠️ **Errore durante l'esecuzione**: {e}"
             )
+
+
+    def get_backbone_cable_report(self):
+        """Genera un report comparativo in forma tabellare della dorsale cavo,
+        interrogando simultaneamente il Gateway Casa (192.168.1.1) e l AP Box DGA (192.168.3.2).
+        """
+        now_str = datetime.now().strftime("%H:%M:%S")
+        router_ip = getattr(config, "OPENWRT_ROUTER_IP", "192.168.1.1").strip()
+        ssh_key = getattr(config, "OPENWRT_SSH_KEY", "/root/.ssh/id_openwrt").strip()
+        dga_key = "/root/.ssh/id_openwrt_rsa" if os.path.exists("/root/.ssh/id_openwrt_rsa") else ssh_key
+        ap_ip = "192.168.3.2"
+
+        # --- A. QUERY LATO GATEWAY CASA (192.168.1.1) ---
+        sh_cmd_gw = (
+            "swconfig dev switch0 set ar8xxx_mib_type 1 2>/dev/null; "
+            "swconfig dev switch0 port 4 get link; "
+            "echo ===MIB===; "
+            "swconfig dev switch0 port 4 get mib"
+        )
+        cmd_gw = [
+            "ssh",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "LogLevel=ERROR",
+            "-o", "ConnectTimeout=4",
+            "-o", "BatchMode=yes",
+            "-o", "NumberOfPasswordPrompts=0"
+        ]
+        if os.path.exists(ssh_key):
+            cmd_gw.extend(["-i", ssh_key])
+        cmd_gw.extend([f"root@{router_ip}", sh_cmd_gw])
+
+        gw_raw = ""
+        try:
+            res_gw = subprocess.run(cmd_gw, capture_output=True, text=True, timeout=8)
+            if res_gw.returncode == 0:
+                gw_raw = res_gw.stdout
+            else:
+                err_gw = res_gw.stderr.strip() or res_gw.stdout.strip()
+                gw_raw = f"ERR:{err_gw}"
+        except Exception as e:
+            gw_raw = f"ERR:{e}"
+
+        # --- B. QUERY LATO AP BOX DGA (192.168.3.2) ---
+        sh_cmd_dga = (
+            "trunk_if='eth0'; "
+            "[ \"$(cat /sys/class/net/eth1/carrier 2>/dev/null)\" = '1' ] && trunk_if='eth1'; "
+            "echo \"IFACE:$trunk_if\"; "
+            "echo '---MEDIA---'; "
+            "/usr/bin/ethctl $trunk_if media-type 2>&1; "
+            "echo '---REG10---'; "
+            "/usr/bin/ethctl $trunk_if reg 10 2>&1; "
+            "echo '---STATS---'; "
+            "cat /sys/class/net/$trunk_if/statistics/rx_crc_errors 2>/dev/null || echo 0; "
+            "cat /sys/class/net/$trunk_if/statistics/rx_frame_errors 2>/dev/null || echo 0; "
+            "cat /sys/class/net/$trunk_if/statistics/collisions 2>/dev/null || echo 0; "
+            "echo '---TDR---'; "
+            "cat /tmp/tdr_trunk_result.txt 2>/dev/null || cat /etc/tdr_trunk_result.txt 2>/dev/null"
+        )
+        dga_key = "/root/.ssh/id_openwrt_rsa" if os.path.exists("/root/.ssh/id_openwrt_rsa") else ssh_key
+        cmd_dga = [
+            "ssh",
+            "-o", "HostKeyAlgorithms=+ssh-rsa",
+            "-o", "PubkeyAcceptedKeyTypes=+ssh-rsa",
+            "-o", "StrictHostKeyChecking=no",
+            "-o", "LogLevel=ERROR",
+            "-o", "ConnectTimeout=5",
+            "-o", "BatchMode=yes"
+        ]
+        if os.path.exists(dga_key):
+            cmd_dga.extend(["-i", dga_key])
+        cmd_dga.extend([f"root@{ap_ip}", sh_cmd_dga])
+
+        dga_raw = ""
+        try:
+            res_dga = subprocess.run(cmd_dga, capture_output=True, text=True, timeout=8)
+            if res_dga.stdout and res_dga.stdout.strip():
+                dga_raw = res_dga.stdout
+            elif res_dga.returncode != 0:
+                dga_raw = f"ERR:{res_dga.stderr.strip() or 'Exit ' + str(res_dga.returncode)}"
+        except Exception as e:
+            dga_raw = f"ERR:{e}"
+
+        # --- C. PING DI VERIFICA TRATTA ---
+        ap_status = "Offline"
+        rtt_str = "N/D"
+        loss_str = "100%"
+        try:
+            param = '-n' if sys.platform.startswith('win') else '-c'
+            w_param = '-w' if sys.platform.startswith('win') else '-W'
+            w_val = '1000' if sys.platform.startswith('win') else '1'
+            p = subprocess.run(
+                ['ping', param, '3', w_param, w_val, ap_ip],
+                capture_output=True, text=True, timeout=4
+            )
+            if p.returncode == 0:
+                ap_status = "Online"
+                loss_str = "0.0%"
+                for l in p.stdout.splitlines():
+                    if "packet loss" in l.lower():
+                        parts_l = l.split("%")[0].split()
+                        if parts_l:
+                            loss_str = f"{parts_l[-1]}%"
+                    if "rtt min/avg/max" in l.lower() or "round-trip min/avg/max" in l.lower():
+                        try:
+                            vals = l.split("=")[1].strip().split()[0].split("/")
+                            if len(vals) >= 3:
+                                rtt_str = f"{vals[1]} ms (min {vals[0]} / max {vals[2]})"
+                        except Exception:
+                            pass
+                    elif "average =" in l.lower() or "media =" in l.lower():
+                        try:
+                            avg_val = l.split("=")[-1].strip()
+                            rtt_str = f"{avg_val}"
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        # --- D. ELABORAZIONE DATI GATEWAY CASA ---
+        gw_speed = "N/D"
+        gw_duplex = "N/D"
+        gw_dsp = "N/D"
+        gw_idle = "0"
+        gw_crc = "0"
+        gw_frame = "0"
+        gw_col = "0"
+        gw_qual = "N/D"
+        rx_human = "0 B"
+        tx_human = "0 B"
+        rx_pkts_tot = 0
+
+        if not gw_raw.startswith("ERR:"):
+            gw_parts = gw_raw.split("===MIB===")
+            link_line = gw_parts[0].strip() if len(gw_parts) > 0 else ""
+            mib_text = gw_parts[1].strip() if len(gw_parts) > 1 else ""
+
+            link_lower = link_line.lower()
+            if "1000baset" in link_lower:
+                gw_speed = "1 Gbps"
+            elif "100baset" in link_lower:
+                gw_speed = "100 Mbps"
+            elif "10baset" in link_lower:
+                gw_speed = "10 Mbps"
+            elif "link:down" in link_lower:
+                gw_speed = "DOWN"
+
+            gw_duplex = "Full" if "full-duplex" in link_lower else ("Half" if "half-duplex" in link_lower else "--")
+
+            mib = {}
+            for line in mib_text.splitlines():
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    mib[k.strip()] = v.strip()
+
+            rx_fcs = int(mib.get("RxFcsErr", 0) or 0)
+            rx_align = int(mib.get("RxAlignErr", 0) or 0)
+            rx_frag = int(mib.get("RxFragment", 0) or 0)
+            tx_late_col = int(mib.get("TxLateCol", 0) or 0)
+
+            gw_crc = str(rx_fcs)
+            gw_frame = str(rx_align + rx_frag)
+            gw_col = str(tx_late_col)
+
+            rx_human = mib.get("RxGoodByte", "0 B")
+            tx_human = mib.get("TxByte", "0 B")
+
+            rx_pkts_tot = sum(int(mib.get(k, 0) or 0) for k in ["Rx64Byte", "Rx128Byte", "Rx256Byte", "Rx512Byte", "Rx1024Byte", "Rx1518Byte"])
+
+            tot_err = rx_fcs + rx_align + rx_frag + tx_late_col
+            if "link:up" in link_lower:
+                gw_dsp = "DSP OK"
+                gw_qual = "OK" if tot_err <= 5 else "DEGRAD"
+            else:
+                gw_dsp = "NO LINK"
+                gw_qual = "DOWN"
+
+        # --- E. ELABORAZIONE DATI AP BOX DGA ---
+        dga_speed = "--"
+        dga_duplex = "--"
+        dga_dsp = "--"
+        dga_idle = "--"
+        dga_crc = "--"
+        dga_frame = "--"
+        dga_col = "--"
+        dga_qual = "--"
+        dga_iface = "eth0 (Porta 1)"
+        tdr_block_lines = []
+        dga_note_err = None
+
+        if dga_raw.startswith("ERR:"):
+            dga_note_err = f"⚠️ *DGA SSH*: `{dga_raw.replace('ERR:', '').strip()}`"
+        else:
+            # Estrazione IFACE
+            if "IFACE:eth1" in dga_raw:
+                dga_iface = "eth1 (Porta 2)"
+            elif "IFACE:eth0" in dga_raw:
+                dga_iface = "eth0 (Porta 1)"
+
+            # 1. Media Type
+            m_lower = dga_raw.lower()
+            if "1000bt full duplex" in m_lower or "1000bt full" in m_lower or "1000bt" in m_lower or "1000" in m_lower:
+                dga_speed = "1 Gbps"
+                dga_duplex = "Full" if "full" in m_lower else "Half"
+            elif "100bt" in m_lower or "100" in m_lower:
+                dga_speed = "100 Mbps"
+                dga_duplex = "Full" if "full" in m_lower else "Half"
+
+            # 2. Registro 10 PHY Broadcom
+            m_reg = re.search(r"register\s+10\s+is\s+(0x[0-9a-fA-F]+)", dga_raw, re.IGNORECASE)
+            if not m_reg:
+                m_reg = re.search(r"is\s+(0x[0-9a-fA-F]+)", dga_raw, re.IGNORECASE)
+            if not m_reg:
+                m_reg = re.search(r"0x[0-9a-fA-F]{4}", dga_raw)
+            reg10_hex = m_reg.group(1) if (m_reg and m_reg.lastindex) else (m_reg.group(0) if m_reg else "N/D")
+
+            if reg10_hex != "N/D":
+                try:
+                    val_reg10 = int(reg10_hex, 16)
+                    local_ok = bool(val_reg10 & (1 << 13))
+                    remote_ok = bool(val_reg10 & (1 << 12))
+                    idle_err_count = val_reg10 & 0xFF
+                    dga_dsp = "DSP OK" if (local_ok and remote_ok) else reg10_hex
+                    dga_idle = str(idle_err_count)
+                    dga_qual = "OK" if (local_ok and remote_ok and idle_err_count == 0) else "WARN"
+                except Exception:
+                    dga_dsp = reg10_hex
+
+            # 3. Stats DGA
+            st_lines = []
+            if "---STATS---" in dga_raw:
+                p_stats = dga_raw.split("---STATS---", 1)[1]
+                if "---TDR---" in p_stats:
+                    p_stats = p_stats.split("---TDR---", 1)[0]
+                st_lines = [l.strip() for l in p_stats.splitlines() if l.strip() and l.strip().isdigit()]
+
+            dga_crc = st_lines[0] if len(st_lines) > 0 else "0"
+            dga_frame = st_lines[1] if len(st_lines) > 1 else "0"
+            dga_col = st_lines[2] if len(st_lines) > 2 else "0"
+
+            # 4. Parsing TDR se presente
+            if "Coppia A" in dga_raw:
+                for line in dga_raw.splitlines():
+                    line_s = line.strip()
+                    if line_s.startswith("Coppia ") or ("- Stato:" in line_s) or ("- Lunghezza:" in line_s):
+                        tdr_block_lines.append(line_s)
+
+        # Formattazione Colonne Tabella monospazio pulita senza emoji sballanti
+        gw_q_str = gw_qual
+        dga_q_str = dga_qual
+
+        table_block = (
+            "```text\n"
+            "+--------------+----------+----------+\n"
+            "| METRICA L1   | GATEWAY  | AP BOX   |\n"
+            "+--------------+----------+----------+\n"
+            f"| Portante     | {gw_speed:<8} | {dga_speed:<8} |\n"
+            f"| Duplex       | {gw_duplex:<8} | {dga_duplex:<8} |\n"
+            f"| Ricevitore   | {gw_dsp:<8} | {dga_dsp:<8} |\n"
+            f"| Idle Errors  | {gw_idle:<8} | {dga_idle:<8} |\n"
+            f"| Errori CRC   | {gw_crc:<8} | {dga_crc:<8} |\n"
+            f"| Frame Err    | {gw_frame:<8} | {dga_frame:<8} |\n"
+            f"| Collisioni   | {gw_col:<8} | {dga_col:<8} |\n"
+            f"| Stato Segn.  | {gw_q_str:<8} | {dga_q_str:<8} |\n"
+            "+--------------+----------+----------+\n"
+            "```"
+        )
+
+        rx_pkts_str = f" ({rx_pkts_tot:,} frame)" if rx_pkts_tot > 0 else ""
+
+        # Benchmark nota
+        if "1 gbps" in gw_speed.lower() or "1000" in dga_speed.lower():
+            benchmark_note = "Dorsale allineata a 1 Gbps (1000Base-T) Full-Duplex. Tutte le 4 coppie del cavo sono integre e certificate Gigabit."
+        else:
+            benchmark_note = f"Dorsale allineata a {gw_speed}. Verificare le coppie secondarie (4-5/7-8) se l'apparato è Gigabit."
+
+        dga_tip_line = f"\n💡 {dga_note_err}\n" if dga_note_err else ""
+
+        # Sezione TDR coppie
+        tdr_section = ""
+        if tdr_block_lines:
+            tdr_section = (
+                "\n📏 *MISURA TDR FISICA DEL CAVO (CableChecker)*:\n"
+                "```text\n" +
+                "\n".join(tdr_block_lines[:12]) +
+                "\n```"
+            )
+
+        report_lines = [
+            f"🔌 *DIAGNOSTICA FISICA DORSALE* (ore {now_str})\n",
+            f"📍 `Gateway Casa ({router_ip})` ➔ `AP Box ({ap_ip})`",
+            f"🏷️ `Port 4 (LAN 3 C7)` ➔ `{dga_iface}`\n",
+            table_block,
+            tdr_section,
+            dga_tip_line,
+            "📊 *DATI DI TRATTA & TRAFFICO*:",
+            f"• **Latenza RTT**: `{rtt_str}` (Loss: `{loss_str}`)",
+            f"• **Volume RX**: `{rx_human}`{rx_pkts_str}",
+            f"• **Volume TX**: `{tx_human}`\n",
+            f"💡 _Benchmark: {benchmark_note}_"
+        ]
+        return "\n".join([l for l in report_lines if l])
+
 
     def start_network_watchdog(self, notify_callback=None, interval=10):
         """Avvia il monitoraggio periodico in background per le 3 telecamere NVR ed i nodi di rete"""

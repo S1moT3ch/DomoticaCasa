@@ -21,8 +21,8 @@ if os.path.exists(env_file):
                     k, v = line_str.split("=", 1)
                     os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
-client_id = os.getenv("DAIKIN_CLIENT_ID", "OoexZXH9XPMtqqRU7sEZdQ9S")
-client_secret = os.getenv("DAIKIN_CLIENT_SECRET", "_G0dyD2xEwRfogctQFG7fOfAK4nlJqrBskqJhCPjWWx6jB0sAVFFvuBDDFNsbw3P4YhEUEB9JuqaL1XFdBdtMw")
+client_id = os.getenv("DAIKIN_CLIENT_ID", "")
+client_secret = os.getenv("DAIKIN_CLIENT_SECRET", "")
 redirect_uri = os.getenv("DAIKIN_REDIRECT_URI", 'https://acsahomeconnectv2-production.up.railway.app/auth/daikin/callback')
 
 token_url = "https://idp.onecta.daikineurope.com/v1/oidc/token"

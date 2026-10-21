@@ -29,7 +29,7 @@ def main():
     from core.presence import PresenceManager
     presence_manager = PresenceManager(
         router_ip=getattr(config, "OPENWRT_ROUTER_IP", "192.168.1.1"),
-        ssh_key=getattr(config, "OPENWRT_SSH_KEY", "/root/.ssh/id_rsa"),
+        ssh_key=getattr(config, "OPENWRT_SSH_KEY", "/root/.ssh/id_openwrt"),
         poll_interval=15
     )
     presence_manager.start()

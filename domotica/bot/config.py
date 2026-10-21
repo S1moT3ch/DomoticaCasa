@@ -128,5 +128,5 @@ VOIP_SYSLOG_PORT = int(os.getenv("VOIP_SYSLOG_PORT", "514"))
 ZTE_SYSLOG_TARGET_IP = os.getenv("ZTE_SYSLOG_TARGET_IP", "192.168.0.2").strip()
 # Rilevamento Presenza Dispositivi di Casa (Router OpenWRT)
 OPENWRT_ROUTER_IP = os.getenv("OPENWRT_ROUTER_IP", "192.168.1.1").strip()
-OPENWRT_SSH_KEY = os.getenv("OPENWRT_SSH_KEY", "/root/.ssh/id_rsa").strip()
+OPENWRT_SSH_KEY = os.getenv("OPENWRT_SSH_KEY", "/root/.ssh/id_openwrt").strip()
 VOIP_RING_FILTER_PRESENCE = os.getenv("VOIP_RING_FILTER_PRESENCE", "True").strip().lower() in ["true", "1", "yes"]
