@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ACSAHome Media Manager - Smart TV Downloader</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-gradient: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+            --card-bg: rgba(22, 27, 34, 0.75);
+            --border-color: rgba(255, 255, 255, 0.1);
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background: var(--bg-gradient);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 2rem 1rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 820px;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .logo-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(59, 130, 246, 0.15);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: var(--primary);
+            padding: 0.4rem 1rem;
+            border-radius: 9999px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        h1 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(90deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        p.subtitle {
+            color: var(--text-muted);
+            font-size: 1.05rem;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 1.25rem;
+            backdrop-filter: blur(16px);
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            font-size: 0.95rem;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 0.75rem;
+        }
+
+        input[type="text"] {
+            flex: 1;
+            background: rgba(13, 17, 23, 0.7);
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
+            padding: 0.85rem 1.2rem;
+            border-radius: 0.75rem;
+            font-size: 1rem;
+            transition: all 0.2s ease;
+        }
+
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+        }
+
+        button {
+            cursor: pointer;
+            border: none;
+            border-radius: 0.75rem;
+            padding: 0.85rem 1.5rem;
+            font-weight: 600;
+            font-size: 1rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: #fff;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        .radio-group {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-top: 0.5rem;
+        }
+
+        .radio-card {
+            border: 1px solid var(--border-color);
+            padding: 1rem;
+            border-radius: 0.75rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: rgba(13, 17, 23, 0.4);
+            transition: all 0.2s ease;
+        }
+
+        .radio-card:hover {
+            border-color: rgba(59, 130, 246, 0.5);
+        }
+
+        .radio-card.active {
+            border-color: var(--primary);
+            background: rgba(59, 130, 246, 0.15);
+        }
+
+        .radio-card input {
+            display: none;
+        }
+
+        .preview-box {
+            background: rgba(13, 17, 23, 0.6);
+            border: 1px dashed rgba(59, 130, 246, 0.4);
+            border-radius: 1rem;
+            padding: 1.5rem;
+            margin-top: 1.5rem;
+            display: none;
+        }
+
+        .preview-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .badge-amazon {
+            background: rgba(245, 158, 11, 0.2);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.4);
+        }
+
+        .badge-gdrive {
+            background: rgba(16, 185, 129, 0.2);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.4);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .stat-item {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 0.5rem;
+            padding: 0.75rem;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: #60a5fa;
+        }
+
+        .stat-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .progress-box {
+            margin-top: 1.5rem;
+            display: none;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 9999px;
+            overflow: hidden;
+            margin-bottom: 0.75rem;
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #3b82f6, #10b981);
+            border-radius: 9999px;
+            transition: width 0.3s ease;
+        }
+
+        .log-terminal {
+            background: #090d13;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 0.75rem;
+            padding: 1rem;
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: #38bdf8;
+            max-height: 150px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        .folder-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+
+        .folder-chip {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .loader {
+            display: inline-block;
+            width: 1rem;
+            height: 1rem;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 640px) {
+            .radio-group { grid-template-columns: 1fr; }
+            .stats-grid { grid-template-columns: 1fr; }
+            .input-group { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo-badge">📺 ACSAHome Media Server (DLNA)</div>
+            <h1>Smart TV Cloud Downloader</h1>
+            <p class="subtitle">Incolla un link Amazon Photos o Google Drive per renderlo visibile all'istante sulla tua Smart TV Samsung.</p>
+        </header>
+
+        <div class="card">
+            <div class="form-group">
+                <label for="cloudUrl">Link Condivisione (Amazon Photos o Google Drive)</label>
+                <div class="input-group">
+                    <input type="text" id="cloudUrl" placeholder="https://www.amazon.it/photos/share/... oppure Google Drive link">
+                    <button class="btn-primary" id="btnInspect" onclick="inspectLink()">
+                        <span>🔍 Analizza</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Preview Album Riconosciuto -->
+            <div id="previewBox" class="preview-box">
+                <div class="preview-header">
+                    <div>
+                        <span id="providerBadge" class="badge badge-amazon">AMAZON PHOTOS</span>
+                        <h3 id="albumTitle" style="margin-top: 0.4rem; font-size: 1.25rem;">Nome Raccolta</h3>
+                    </div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-value" id="statTotal">0</div>
+                        <div class="stat-label">File Totali</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="statVideos">0</div>
+                        <div class="stat-label">Video / Film</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="statPhotos">0</div>
+                        <div class="stat-label">Fotografie</div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="folderName">Nome Cartella sul Media Server TV</label>
+                    <input type="text" id="folderName" placeholder="Es. Katia e Antonio">
+                </div>
+
+                <div class="form-group">
+                    <label>Destinazione sulla TV Samsung</label>
+                    <div class="radio-group">
+                        <div class="radio-card active" id="cardMovies" onclick="selectType('movies')">
+                            <input type="radio" name="mediaType" value="movies" checked>
+                            <div>
+                                <strong>🎬 Video / Film</strong>
+                                <div style="font-size: 0.8rem; color: var(--text-muted);">Cartella /media/Movies (DLNA Video)</div>
+                            </div>
+                        </div>
+                        <div class="radio-card" id="cardPictures" onclick="selectType('pictures')">
+                            <input type="radio" name="mediaType" value="pictures">
+                            <div>
+                                <strong>🖼️ Foto / Album</strong>
+                                <div style="font-size: 0.8rem; color: var(--text-muted);">Cartella /media/Pictures (DLNA Foto)</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="btn-primary" id="btnDownload" onclick="startDownload()" style="width: 100%; padding: 1rem; font-size: 1.1rem; margin-top: 1rem;">
+                    🚀 Avvia Download nel Media Server
+                </button>
+            </div>
+
+            <!-- Progress Box -->
+            <div id="progressBox" class="progress-box">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
+                    <strong id="progressStatusText">Download in corso...</strong>
+                    <span id="progressPercent">0%</span>
+                </div>
+                <div class="progress-bar-container">
+                    <div id="progressBar" class="progress-bar"></div>
+                </div>
+                <div id="logTerminal" class="log-terminal">Inizializzazione stream...</div>
+            </div>
+        </div>
+
+        <!-- Libreria Cartelle Esistenti ed Esplora File -->
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                <h3>📁 Gestione Libreria Multimediale DLNA</h3>
+                <button class="btn-secondary" onclick="loadFolders()" style="padding: 0.4rem 0.8rem; font-size: 0.85rem;">🔄 Ricarica</button>
+            </div>
+            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem;">
+                Visualizza, esplora e gestisci lo spazio dei contenuti salvati su `/mnt/sda5/media`:
+            </p>
+
+            <strong style="font-size: 1rem; color: #60a5fa; display: flex; align-items: center; gap: 0.5rem;">
+                🎬 Raccolte Video / Film
+            </strong>
+            <div id="moviesContainer" style="margin-top: 0.75rem; margin-bottom: 1.5rem;">Caricamento...</div>
+
+            <strong style="font-size: 1rem; color: #34d399; display: flex; align-items: center; gap: 0.5rem;">
+                🖼️ Raccolte Fotografie
+            </strong>
+            <div id="picturesContainer" style="margin-top: 0.75rem;">Caricamento...</div>
+        </div>
+    </div>
+
+    <!-- Modal Dettagli File Cartella -->
+    <div id="folderModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.75); backdrop-filter: blur(8px); z-index: 1000; align-items: center; justify-content: center;">
+        <div style="background: #161b22; border: 1px solid var(--border-color); border-radius: 1rem; width: 90%; max-width: 650px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.6);">
+            <div style="padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                <h3 id="modalTitle" style="font-size: 1.2rem; color: #60a5fa;">📁 Dettaglio Cartella</h3>
+                <button class="btn-secondary" onclick="closeModal()" style="padding: 0.3rem 0.7rem; font-size: 1rem;">✕</button>
+            </div>
+            <div id="modalFilesList" style="padding: 1.25rem 1.5rem; overflow-y: auto; flex: 1;">
+                <!-- Lista file con tasto elimina -->
+            </div>
+            <div style="padding: 1rem 1.5rem; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2);">
+                <button class="btn-secondary" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.4);" id="btnDeleteFolderModal" onclick="deleteCurrentFolder()">
+                    🗑️ Elimina Intera Cartella
+                </button>
+                <button class="btn-secondary" onclick="closeModal()">Chiudi</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedMediaType = "movies";
+        let currentJobId = null;
+        let pollTimer = null;
+        let currentModalFolder = null;
+        let currentModalType = null;
+        let cachedFoldersData = null;
+
+        function selectType(type) {
+            selectedMediaType = type;
+            document.getElementById("cardMovies").classList.toggle("active", type === "movies");
+            document.getElementById("cardPictures").classList.toggle("active", type === "pictures");
+        }
+
+        async function inspectLink() {
+            const url = document.getElementById("cloudUrl").value.trim();
+            if (!url) {
+                alert("Inserisci un link valido!");
+                return;
+            }
+
+            const btn = document.getElementById("btnInspect");
+            btn.innerHTML = `<span class="loader"></span> Analisi in corso...`;
+            btn.disabled = true;
+
+            try {
+                const res = await fetch(`/cgi-bin/media_downloader.py?action=inspect&url=${encodeURIComponent(url)}`);
+                const data = await res.json();
+
+                if (data.error) {
+                    alert("Errore: " + data.error);
+                    return;
+                }
+
+                document.getElementById("previewBox").style.display = "block";
+                document.getElementById("albumTitle").innerText = data.title;
+                document.getElementById("folderName").value = data.title.replace(/[\/\\?%*:|"<>]/g, '_');
+
+                const badge = document.getElementById("providerBadge");
+                if (data.provider === "amazon") {
+                    badge.className = "badge badge-amazon";
+                    badge.innerText = "AMAZON PHOTOS";
+                } else {
+                    badge.className = "badge badge-gdrive";
+                    badge.innerText = "GOOGLE DRIVE";
+                }
+
+                document.getElementById("statTotal").innerText = data.total_files || 1;
+                document.getElementById("statVideos").innerText = data.video_count || 0;
+                document.getElementById("statPhotos").innerText = data.photo_count || 0;
+
+                selectType(data.suggested_type || "movies");
+
+            } catch (err) {
+                alert("Errore di rete o server non raggiungibile: " + err);
+            } finally {
+                btn.innerHTML = `<span>🔍 Analizza</span>`;
+                btn.disabled = false;
+            }
+        }
+
+        async function startDownload() {
+            const url = document.getElementById("cloudUrl").value.trim();
+            const folderName = document.getElementById("folderName").value.trim();
+
+            if (!folderName) {
+                alert("Inserisci un nome cartella!");
+                return;
+            }
+
+            const btn = document.getElementById("btnDownload");
+            btn.innerHTML = `<span class="loader"></span> Avvio in corso...`;
+            btn.disabled = true;
+
+            try {
+                const formData = new URLSearchParams();
+                formData.append("action", "start");
+                formData.append("url", url);
+                formData.append("folder_name", folderName);
+                formData.append("media_type", selectedMediaType);
+
+                const res = await fetch('/cgi-bin/media_downloader.py', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: formData.toString()
+                });
+                const data = await res.json();
+
+                if (data.error) {
+                    alert("Errore: " + data.error);
+                    btn.disabled = false;
+                    btn.innerText = "🚀 Avvia Download nel Media Server";
+                    return;
+                }
+
+                currentJobId = data.job_id;
+                document.getElementById("progressBox").style.display = "block";
+                document.getElementById("btnDownload").style.display = "none";
+
+                pollProgress();
+
+            } catch (err) {
+                alert("Errore avvio download: " + err);
+                btn.disabled = false;
+                btn.innerText = "🚀 Avvia Download nel Media Server";
+            }
+        }
+
+        async function pollProgress() {
+            if (!currentJobId) return;
+
+            try {
+                const res = await fetch(`/cgi-bin/media_downloader.py?action=status&job_id=${currentJobId}`);
+                const data = await res.json();
+
+                if (data.error) {
+                    document.getElementById("progressStatusText").innerText = "Errore: " + data.error;
+                    return;
+                }
+
+                const total = data.total || 1;
+                const completed = data.completed || 0;
+                const percent = Math.min(100, Math.round((completed / total) * 100));
+
+                document.getElementById("progressBar").style.width = percent + "%";
+                document.getElementById("progressPercent").innerText = percent + "%";
+
+                if (data.log) {
+                    const term = document.getElementById("logTerminal");
+                    term.innerText = data.log;
+                    term.scrollTop = term.scrollHeight;
+                }
+
+                if (data.status === "DONE") {
+                    document.getElementById("progressStatusText").innerHTML = "✅ **Completato! File pronti su Smart TV Samsung!**";
+                    document.getElementById("progressBar").style.width = "100%";
+                    document.getElementById("progressPercent").innerText = "100%";
+                    loadFolders();
+                    return;
+                }
+
+                pollTimer = setTimeout(pollProgress, 1500);
+
+            } catch (e) {
+                pollTimer = setTimeout(pollProgress, 2000);
+            }
+        }
+
+        function formatBytes(bytes) {
+            if (!bytes || bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        async function loadFolders() {
+            try {
+                const res = await fetch('/cgi-bin/media_downloader.py?action=list_folders');
+                const data = await res.json();
+                cachedFoldersData = data;
+
+                renderFolderGroup("moviesContainer", data.movies, "movies");
+                renderFolderGroup("picturesContainer", data.pictures, "pictures");
+
+            } catch (err) {
+                console.error("Errore caricamento cartelle", err);
+            }
+        }
+
+        function renderFolderGroup(containerId, folders, type) {
+            const el = document.getElementById(containerId);
+            if (!folders || folders.length === 0) {
+                el.innerHTML = `<span style="color: var(--text-muted); font-size: 0.85rem;">Nessuna cartella presente.</span>`;
+                return;
+            }
+
+            el.innerHTML = `
+                <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.75rem;">
+                    ${folders.map(f => `
+                        <div style="background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); border-radius: 0.75rem; padding: 0.85rem; display: flex; flex-direction: column; justify-content: space-between; gap: 0.5rem;">
+                            <div>
+                                <div style="font-weight: 600; font-size: 0.95rem; display: flex; align-items: center; gap: 0.4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                    ${type === 'movies' ? '🎬' : '🖼️'} ${f.name}
+                                </div>
+                                <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">
+                                    ${f.count} elementi • ${formatBytes(f.total_size)}
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 0.4rem; margin-top: 0.25rem;">
+                                <button class="btn-secondary" onclick="openFolderDetails('${type}', '${f.name.replace(/'/g, "\\'")}')" style="flex: 1; padding: 0.4rem; font-size: 0.8rem;">
+                                    👁️ Esplora
+                                </button>
+                                <button class="btn-secondary" onclick="confirmDeleteFolder('${type}', '${f.name.replace(/'/g, "\\'")}')" style="padding: 0.4rem 0.6rem; color: #ef4444; border-color: rgba(239, 68, 68, 0.3);" title="Elimina cartella">
+                                    🗑️
+                                </button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function openFolderDetails(type, folderName) {
+            currentModalFolder = folderName;
+            currentModalType = type;
+
+            const group = type === 'movies' ? cachedFoldersData.movies : cachedFoldersData.pictures;
+            const folderObj = group.find(f => f.name === folderName);
+
+            document.getElementById("modalTitle").innerText = `${type === 'movies' ? '🎬' : '🖼️'} ${folderName}`;
+            const listEl = document.getElementById("modalFilesList");
+
+            if (!folderObj || !folderObj.files || folderObj.files.length === 0) {
+                listEl.innerHTML = `<div style="text-align: center; color: var(--text-muted); padding: 2rem;">Cartella vuota.</div>`;
+            } else {
+                listEl.innerHTML = folderObj.files.map(fi => `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.6rem 0; border-bottom: 1px solid rgba(255,255,255,0.05);">
+                        <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 75%;">
+                            <div style="font-size: 0.9rem; font-weight: 500;">📄 ${fi.name}</div>
+                            <div style="font-size: 0.75rem; color: var(--text-muted);">${formatBytes(fi.size)}</div>
+                        </div>
+                        <button class="btn-secondary" onclick="deleteSingleFile('${type}', '${folderName.replace(/'/g, "\\'")}', '${fi.name.replace(/'/g, "\\'")}')" style="padding: 0.3rem 0.6rem; font-size: 0.8rem; color: #ef4444; border-color: rgba(239,68,68,0.3);">
+                            Elimina
+                        </button>
+                    </div>
+                `).join('');
+            }
+
+            document.getElementById("folderModal").style.display = "flex";
+        }
+
+        function closeModal() {
+            document.getElementById("folderModal").style.display = "none";
+        }
+
+        async function confirmDeleteFolder(type, folderName) {
+            if (!confirm(`Sei sicuro di voler eliminare la cartella "${folderName}" e tutti i suoi file dal Media Server?`)) return;
+
+            try {
+                const formData = new URLSearchParams();
+                formData.append("action", "delete_folder");
+                formData.append("media_type", type);
+                formData.append("folder_name", folderName);
+
+                const res = await fetch('/cgi-bin/media_downloader.py', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: formData.toString()
+                });
+                const d = await res.json();
+                if (d.error) {
+                    alert("Errore: " + d.error);
+                } else {
+                    loadFolders();
+                }
+            } catch (e) {
+                alert("Errore durante l'eliminazione: " + e);
+            }
+        }
+
+        async function deleteCurrentFolder() {
+            if (currentModalType && currentModalFolder) {
+                await confirmDeleteFolder(currentModalType, currentModalFolder);
+                closeModal();
+            }
+        }
+
+        async function deleteSingleFile(type, folderName, fileName) {
+            if (!confirm(`Eliminare il file "${fileName}"?`)) return;
+
+            try {
+                const formData = new URLSearchParams();
+                formData.append("action", "delete_file");
+                formData.append("media_type", type);
+                formData.append("folder_name", folderName);
+                formData.append("file_name", fileName);
+
+                const res = await fetch('/cgi-bin/media_downloader.py', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: formData.toString()
+                });
+                const d = await res.json();
+                if (d.error) {
+                    alert("Errore: " + d.error);
+                } else {
+                    await loadFolders();
+                    openFolderDetails(type, folderName);
+                }
+            } catch (e) {
+                alert("Errore durante l'eliminazione: " + e);
+            }
+        }
+
+        // Carica elenco all'avvio
+        loadFolders();
+
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('url')) {
+            document.getElementById("cloudUrl").value = urlParams.get('url');
+            inspectLink();
+        }
+    </script>
+</body>
+</html>
