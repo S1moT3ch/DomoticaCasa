@@ -214,12 +214,6 @@
             border: 1px solid rgba(245, 158, 11, 0.4);
         }
 
-        .badge-gdrive {
-            background: rgba(16, 185, 129, 0.2);
-            color: #34d399;
-            border: 1px solid rgba(16, 185, 129, 0.4);
-        }
-
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
@@ -243,6 +237,43 @@
         .stat-label {
             font-size: 0.8rem;
             color: var(--text-muted);
+        }
+
+        .dropzone {
+            border: 2px dashed rgba(59, 130, 246, 0.4);
+            border-radius: 1rem;
+            padding: 2.5rem 1.5rem;
+            text-align: center;
+            background: rgba(13, 17, 23, 0.4);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .dropzone:hover, .dropzone.dragover {
+            border-color: var(--primary);
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .tab-nav {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .tab-btn {
+            background: transparent;
+            color: var(--text-muted);
+            border-radius: 0.5rem;
+            padding: 0.5rem 1rem;
+            font-size: 0.95rem;
+        }
+
+        .tab-btn.active {
+            background: rgba(59, 130, 246, 0.15);
+            color: var(--primary);
+            font-weight: 600;
         }
 
         .progress-box {
@@ -280,24 +311,6 @@
             white-space: pre-wrap;
         }
 
-        .folder-list {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.75rem;
-            margin-top: 1rem;
-        }
-
-        .folder-chip {
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid var(--border-color);
-            padding: 0.5rem 1rem;
-            border-radius: 0.5rem;
-            font-size: 0.9rem;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
         .loader {
             display: inline-block;
             width: 1rem;
@@ -311,97 +324,138 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
-
-        @media (max-width: 640px) {
-            .radio-group { grid-template-columns: 1fr; }
-            .stats-grid { grid-template-columns: 1fr; }
-            .input-group { flex-direction: column; }
-        }
     </style>
 </head>
 <body>
     <div class="container">
         <header>
             <div class="logo-badge">📺 ACSAHome Media Server (DLNA)</div>
-            <h1>Smart TV Cloud Downloader</h1>
-            <p class="subtitle">Incolla un link Amazon Photos o Google Drive per renderlo visibile all'istante sulla tua Smart TV Samsung.</p>
+            <h1>Smart TV Media Manager</h1>
+            <p class="subtitle">Carica contenuti da Amazon Photos o direttamente dal tuo PC per vederli sulla TV Samsung.</p>
         </header>
 
         <div class="card">
-            <div class="form-group">
-                <label for="cloudUrl">Link Condivisione (Amazon Photos o Google Drive)</label>
-                <div class="input-group">
-                    <input type="text" id="cloudUrl" placeholder="https://www.amazon.it/photos/share/... oppure Google Drive link">
-                    <button class="btn-primary" id="btnInspect" onclick="inspectLink()">
-                        <span>🔍 Analizza</span>
+            <div class="tab-nav">
+                <button class="tab-btn active" id="tabLinkBtn" onclick="switchTab('link')">🔗 Link Cloud (Amazon Photos)</button>
+                <button class="tab-btn" id="tabUploadBtn" onclick="switchTab('upload')">📤 Carica da Computer (File / Cartella)</button>
+            </div>
+
+            <!-- SEZIONE 1: LINK CLOUD -->
+            <div id="sectionLink">
+                <div class="form-group">
+                    <label for="cloudUrl">Link Condivisione (Amazon Photos o Google Drive)</label>
+                    <div class="input-group">
+                        <input type="text" id="cloudUrl" placeholder="https://www.amazon.it/photos/share/...">
+                        <button class="btn-primary" id="btnInspect" onclick="inspectLink()">
+                            <span>🔍 Analizza</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="previewBox" class="preview-box">
+                    <div class="preview-header">
+                        <div>
+                            <span id="providerBadge" class="badge badge-amazon">AMAZON PHOTOS</span>
+                            <h3 id="albumTitle" style="margin-top: 0.4rem; font-size: 1.25rem;">Nome Raccolta</h3>
+                        </div>
+                    </div>
+
+                    <div class="stats-grid">
+                        <div class="stat-item">
+                            <div class="stat-value" id="statTotal">0</div>
+                            <div class="stat-label">File Totali</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="statVideos">0</div>
+                            <div class="stat-label">Video / Film</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-value" id="statPhotos">0</div>
+                            <div class="stat-label">Fotografie</div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="folderName">Nome Cartella sulla TV</label>
+                        <input type="text" id="folderName" placeholder="Es. Katia e Antonio">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Destinazione sulla TV Samsung</label>
+                        <div class="radio-group">
+                            <div class="radio-card active" id="cardMovies" onclick="selectType('movies')">
+                                <input type="radio" name="mediaType" value="movies" checked>
+                                <div>
+                                    <strong>🎬 Video / Film</strong>
+                                    <div style="font-size: 0.8rem; color: var(--text-muted);">Cartella Movies</div>
+                                </div>
+                            </div>
+                            <div class="radio-card" id="cardPictures" onclick="selectType('pictures')">
+                                <input type="radio" name="mediaType" value="pictures">
+                                <div>
+                                    <strong>🖼️ Foto / Album</strong>
+                                    <div style="font-size: 0.8rem; color: var(--text-muted);">Cartella Pictures</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button class="btn-primary" id="btnDownload" onclick="startDownload()" style="width: 100%; padding: 1rem; font-size: 1.1rem; margin-top: 1rem;">
+                        🚀 Avvia Download nel Media Server
                     </button>
                 </div>
             </div>
 
-            <!-- Preview Album Riconosciuto -->
-            <div id="previewBox" class="preview-box">
-                <div class="preview-header">
-                    <div>
-                        <span id="providerBadge" class="badge badge-amazon">AMAZON PHOTOS</span>
-                        <h3 id="albumTitle" style="margin-top: 0.4rem; font-size: 1.25rem;">Nome Raccolta</h3>
-                    </div>
-                </div>
-
-                <div class="stats-grid">
-                    <div class="stat-item">
-                        <div class="stat-value" id="statTotal">0</div>
-                        <div class="stat-label">File Totali</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="statVideos">0</div>
-                        <div class="stat-label">Video / Film</div>
-                    </div>
-                    <div class="stat-item">
-                        <div class="stat-value" id="statPhotos">0</div>
-                        <div class="stat-label">Fotografie</div>
-                    </div>
+            <!-- SEZIONE 2: UPLOAD DIRETTO DA PC -->
+            <div id="sectionUpload" style="display: none;">
+                <div class="form-group">
+                    <label for="uploadFolderName">Nome Cartella di Destinazione sulla TV</label>
+                    <input type="text" id="uploadFolderName" placeholder="Es. Foto_Gita_2026">
                 </div>
 
                 <div class="form-group">
-                    <label for="folderName">Nome Cartella sul Media Server TV</label>
-                    <input type="text" id="folderName" placeholder="Es. Katia e Antonio">
-                </div>
-
-                <div class="form-group">
-                    <label>Destinazione sulla TV Samsung</label>
+                    <label>Tipo di Contenuto</label>
                     <div class="radio-group">
-                        <div class="radio-card active" id="cardMovies" onclick="selectType('movies')">
-                            <input type="radio" name="mediaType" value="movies" checked>
+                        <div class="radio-card active" id="upCardMovies" onclick="selectUploadType('movies')">
                             <div>
                                 <strong>🎬 Video / Film</strong>
-                                <div style="font-size: 0.8rem; color: var(--text-muted);">Cartella /media/Movies (DLNA Video)</div>
+                                <div style="font-size: 0.8rem; color: var(--text-muted);">Cartella /media/Movies</div>
                             </div>
                         </div>
-                        <div class="radio-card" id="cardPictures" onclick="selectType('pictures')">
-                            <input type="radio" name="mediaType" value="pictures">
+                        <div class="radio-card" id="upCardPictures" onclick="selectUploadType('pictures')">
                             <div>
-                                <strong>🖼️ Foto / Album</strong>
-                                <div style="font-size: 0.8rem; color: var(--text-muted);">Cartella /media/Pictures (DLNA Foto)</div>
+                                <strong>🖼️ Foto / Immagini</strong>
+                                <div style="font-size: 0.8rem; color: var(--text-muted);">Cartella /media/Pictures</div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <button class="btn-primary" id="btnDownload" onclick="startDownload()" style="width: 100%; padding: 1rem; font-size: 1.1rem; margin-top: 1rem;">
-                    🚀 Avvia Download nel Media Server
-                </button>
+                <div class="dropzone" id="dropzone" onclick="document.getElementById('pcFileInput').click()">
+                    <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📁</div>
+                    <strong style="font-size: 1.1rem; display: block; margin-bottom: 0.25rem;">Trascina qui i tuoi file o clicca per selezionarli</strong>
+                    <span style="font-size: 0.85rem; color: var(--text-muted);">Supporta file singoli multipli o intere cartelle dal tuo PC</span>
+                    <input type="file" id="pcFileInput" multiple style="display: none;" onchange="handleFilesSelected(this.files)">
+                </div>
+
+                <div id="uploadSelectedFiles" style="margin-top: 1rem; display: none;">
+                    <div style="font-size: 0.9rem; font-weight: 600; margin-bottom: 0.5rem;" id="selectedCountText">0 file selezionati</div>
+                    <button class="btn-primary" id="btnStartUpload" onclick="uploadFilesFromPC()" style="width: 100%; padding: 0.85rem;">
+                        ⬆️ Carica sul Media Server
+                    </button>
+                </div>
             </div>
 
             <!-- Progress Box -->
             <div id="progressBox" class="progress-box">
                 <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                    <strong id="progressStatusText">Download in corso...</strong>
+                    <strong id="progressStatusText">Operazione in corso...</strong>
                     <span id="progressPercent">0%</span>
                 </div>
                 <div class="progress-bar-container">
                     <div id="progressBar" class="progress-bar"></div>
                 </div>
-                <div id="logTerminal" class="log-terminal">Inizializzazione stream...</div>
+                <div id="logTerminal" class="log-terminal">In attesa...</div>
             </div>
         </div>
 
@@ -434,9 +488,7 @@
                 <h3 id="modalTitle" style="font-size: 1.2rem; color: #60a5fa;">📁 Dettaglio Cartella</h3>
                 <button class="btn-secondary" onclick="closeModal()" style="padding: 0.3rem 0.7rem; font-size: 1rem;">✕</button>
             </div>
-            <div id="modalFilesList" style="padding: 1.25rem 1.5rem; overflow-y: auto; flex: 1;">
-                <!-- Lista file con tasto elimina -->
-            </div>
+            <div id="modalFilesList" style="padding: 1.25rem 1.5rem; overflow-y: auto; flex: 1;"></div>
             <div style="padding: 1rem 1.5rem; border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.2);">
                 <button class="btn-secondary" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.4);" id="btnDeleteFolderModal" onclick="deleteCurrentFolder()">
                     🗑️ Elimina Intera Cartella
@@ -448,16 +500,108 @@
 
     <script>
         let selectedMediaType = "movies";
+        let uploadMediaType = "movies";
         let currentJobId = null;
         let pollTimer = null;
         let currentModalFolder = null;
         let currentModalType = null;
         let cachedFoldersData = null;
+        let selectedFilesList = [];
+
+        function switchTab(tab) {
+            document.getElementById("sectionLink").style.display = tab === 'link' ? 'block' : 'none';
+            document.getElementById("sectionUpload").style.display = tab === 'upload' ? 'block' : 'none';
+            document.getElementById("tabLinkBtn").classList.toggle("active", tab === 'link');
+            document.getElementById("tabUploadBtn").classList.toggle("active", tab === 'upload');
+        }
 
         function selectType(type) {
             selectedMediaType = type;
-            document.getElementById("cardMovies").classList.toggle("active", type === "movies");
-            document.getElementById("cardPictures").classList.toggle("active", type === "pictures");
+            document.getElementById("cardMovies").classList.toggle("active", type === 'movies');
+            document.getElementById("cardPictures").classList.toggle("active", type === 'pictures');
+        }
+
+        function selectUploadType(type) {
+            uploadMediaType = type;
+            document.getElementById("upCardMovies").classList.toggle("active", type === 'movies');
+            document.getElementById("upCardPictures").classList.toggle("active", type === 'pictures');
+        }
+
+        // Drag and Drop
+        const dropzone = document.getElementById("dropzone");
+        ['dragenter', 'dragover'].forEach(name => {
+            dropzone.addEventListener(name, (e) => { e.preventDefault(); dropzone.classList.add("dragover"); });
+        });
+        ['dragleave', 'drop'].forEach(name => {
+            dropzone.addEventListener(name, (e) => { e.preventDefault(); dropzone.classList.remove("dragover"); });
+        });
+        dropzone.addEventListener('drop', (e) => {
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                handleFilesSelected(e.dataTransfer.files);
+            }
+        });
+
+        function handleFilesSelected(files) {
+            selectedFilesList = Array.from(files);
+            document.getElementById("uploadSelectedFiles").style.display = "block";
+            let totalBytes = selectedFilesList.reduce((acc, f) => acc + f.size, 0);
+            document.getElementById("selectedCountText").innerText = `${selectedFilesList.length} file selezionati (${formatBytes(totalBytes)})`;
+        }
+
+        async function uploadFilesFromPC() {
+            let folderName = document.getElementById("uploadFolderName").value.trim();
+            if (!folderName) {
+                folderName = "Upload_" + new Date().toISOString().slice(0, 10);
+            }
+            if (selectedFilesList.length === 0) {
+                alert("Seleziona almeno un file!");
+                return;
+            }
+
+            const pBox = document.getElementById("progressBox");
+            const pBar = document.getElementById("progressBar");
+            const pText = document.getElementById("progressStatusText");
+            const pPercent = document.getElementById("progressPercent");
+            const term = document.getElementById("logTerminal");
+
+            pBox.style.display = "block";
+            pText.innerText = "Caricamento file da PC in corso...";
+            pBar.style.width = "0%";
+            pPercent.innerText = "0%";
+            term.innerText = `Avvio invio di ${selectedFilesList.length} file nel server...\n`;
+
+            const formData = new FormData();
+            formData.append("action", "upload");
+            formData.append("folder_name", folderName);
+            formData.append("media_type", uploadMediaType);
+            selectedFilesList.forEach(f => formData.append("file", f));
+
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", "/cgi-bin/media_downloader.py", true);
+
+            xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    pBar.style.width = percent + "%";
+                    pPercent.innerText = percent + "%";
+                    term.innerText = `Inviati ${formatBytes(e.loaded)} su ${formatBytes(e.total)} (${percent}%)...`;
+                }
+            };
+
+            xhr.onload = () => {
+                if (xhr.status === 200) {
+                    pText.innerHTML = "✅ **Caricamento completato! File sincronizzati sulla Smart TV!**";
+                    pBar.style.width = "100%";
+                    pPercent.innerText = "100%";
+                    term.innerText += "\nUpload terminato con successo!";
+                    loadFolders();
+                } else {
+                    alert("Errore upload: " + xhr.responseText);
+                }
+            };
+
+            xhr.onerror = () => { alert("Errore di rete durante il caricamento."); };
+            xhr.send(formData);
         }
 
         async function inspectLink() {
@@ -468,7 +612,7 @@
             }
 
             const btn = document.getElementById("btnInspect");
-            btn.innerHTML = `<span class="loader"></span> Analisi in corso...`;
+            btn.innerHTML = `<span class="loader"></span> Analisi...`;
             btn.disabled = true;
 
             try {
@@ -484,15 +628,6 @@
                 document.getElementById("albumTitle").innerText = data.title;
                 document.getElementById("folderName").value = data.title.replace(/[\/\\?%*:|"<>]/g, '_');
 
-                const badge = document.getElementById("providerBadge");
-                if (data.provider === "amazon") {
-                    badge.className = "badge badge-amazon";
-                    badge.innerText = "AMAZON PHOTOS";
-                } else {
-                    badge.className = "badge badge-gdrive";
-                    badge.innerText = "GOOGLE DRIVE";
-                }
-
                 document.getElementById("statTotal").innerText = data.total_files || 1;
                 document.getElementById("statVideos").innerText = data.video_count || 0;
                 document.getElementById("statPhotos").innerText = data.photo_count || 0;
@@ -500,7 +635,7 @@
                 selectType(data.suggested_type || "movies");
 
             } catch (err) {
-                alert("Errore di rete o server non raggiungibile: " + err);
+                alert("Errore di rete: " + err);
             } finally {
                 btn.innerHTML = `<span>🔍 Analizza</span>`;
                 btn.disabled = false;
@@ -517,7 +652,7 @@
             }
 
             const btn = document.getElementById("btnDownload");
-            btn.innerHTML = `<span class="loader"></span> Avvio in corso...`;
+            btn.innerHTML = `<span class="loader"></span> Avvio...`;
             btn.disabled = true;
 
             try {
@@ -544,7 +679,6 @@
                 currentJobId = data.job_id;
                 document.getElementById("progressBox").style.display = "block";
                 document.getElementById("btnDownload").style.display = "none";
-
                 pollProgress();
 
             } catch (err) {
@@ -610,7 +744,6 @@
 
                 renderFolderGroup("moviesContainer", data.movies, "movies");
                 renderFolderGroup("picturesContainer", data.pictures, "pictures");
-
             } catch (err) {
                 console.error("Errore caricamento cartelle", err);
             }
@@ -741,14 +874,7 @@
             }
         }
 
-        // Carica elenco all'avvio
         loadFolders();
-
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('url')) {
-            document.getElementById("cloudUrl").value = urlParams.get('url');
-            inspectLink();
-        }
     </script>
 </body>
 </html>

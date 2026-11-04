@@ -1,0 +1,10 @@
+#EXTM3U
+#EXTINF:-1 tvg-id="cam1" tvg-name="Soggiorno" group-title="Telecamere Casa",Cam 1 - Soggiorno
+http://192.168.1.162:8080/cam1_live/live.m3u8
+
+#EXTINF:-1 tvg-id="cam3" tvg-name="Corridoio" group-title="Telecamere Casa",Cam 3 - Corridoio
+http://192.168.1.162:8080/cam3_live/live.m3u8
+
+#EXTINF:-1 tvg-id="cam2" tvg-name="Box" group-title="Telecamere Casa",Cam 2 - Box
+http://192.168.1.162:8080/cam2_live/live.m3u8
+

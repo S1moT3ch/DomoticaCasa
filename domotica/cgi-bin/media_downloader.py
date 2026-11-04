@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import shutil
 import subprocess
 import urllib.request
 import urllib.parse
@@ -71,8 +72,6 @@ def get_amazon_album_info(share_id):
 def get_amazon_files(share_id, node_id):
     files = []
     headers = get_amazon_headers(share_id)
-    
-    # Coda di nodi da esplorare (es. prima la root collection, poi la visual collection dei file)
     nodes_to_process = [node_id]
     
     while nodes_to_process:
@@ -88,7 +87,6 @@ def get_amazon_files(share_id, node_id):
                 items = data.get("data", [])
                 for it in items:
                     kind = it.get("kind", "")
-                    # Se è un contenitore (VISUAL_COLLECTION, ALBUM, GROUP, FOLDER), aggiungilo alla coda
                     if kind in ["VISUAL_COLLECTION", "COLLECTION", "FOLDER", "GROUP", "ALBUM"]:
                         nodes_to_process.append(it.get("id"))
                     else:
@@ -111,7 +109,6 @@ def get_amazon_files(share_id, node_id):
     return files
 
 def trigger_download_job(target_dir, files, job_id):
-    # Genera script bash di download eseguito in background
     job_sh = os.path.join(LOG_DIR, f"{job_id}.sh")
     job_log = os.path.join(LOG_DIR, f"{job_id}.log")
     job_status = os.path.join(LOG_DIR, f"{job_id}.status")
@@ -130,7 +127,6 @@ def trigger_download_job(target_dir, files, job_id):
             f.write(f"python3 -c 'import json; p=\"{job_status}\"; d=json.load(open(p)); d[\"completed\"]={idx-1}; d[\"current\"]=\"{fname}\"; json.dump(d, open(p, \"w\"))'\n")
             f.write(f"curl -sSL -A 'Mozilla/5.0' -o '{fname}' '{furl}' >> '{job_log}' 2>&1\n")
         
-        # Fine download: aggiorna minidlna
         f.write(f"echo 'Tutti i file scaricati con successo!' >> '{job_log}'\n")
         f.write(f"python3 -c 'import json; p=\"{job_status}\"; d=json.load(open(p)); d[\"status\"]=\"DONE\"; d[\"completed\"]={len(files)}; d[\"current\"]=\"\"; json.dump(d, open(p, \"w\"))'\n")
         f.write("/usr/bin/minidlna -R 2>/dev/null || /etc/init.d/minidlna restart >/dev/null 2>&1\n")
@@ -177,17 +173,16 @@ def main():
                 "suggested_type": "movies"
             })
 
-        send_json({"error": "Link non riconosciuto. Inserire un link di condivisione valido di Amazon Photos o Google Drive."}, 400)
+        send_json({"error": "Link non riconosciuto. Inserire un link valido di Amazon Photos o Google Drive."}, 400)
 
     elif action == "start":
         url = form.getvalue("url", "").strip()
         folder_name = form.getvalue("folder_name", "").strip()
-        media_type = form.getvalue("media_type", "movies").strip() # 'movies' o 'pictures'
+        media_type = form.getvalue("media_type", "movies").strip()
 
         if not url or not folder_name:
             send_json({"error": "URL e nome cartella obbligatori"}, 400)
 
-        # Sanifica nome cartella
         folder_name = re.sub(r'[^a-zA-Z0-9_\- ]', '_', folder_name).strip()
         target_dir = os.path.join(MOVIES_DIR if media_type == "movies" else PICTURES_DIR, folder_name)
 
@@ -208,35 +203,44 @@ def main():
             except Exception as e:
                 send_json({"error": f"Errore avvio download Amazon: {e}"}, 500)
 
-        g_id, g_type = extract_gdrive_id(url)
-        if g_id:
-            # Download da Google Drive
-            os.makedirs(target_dir, exist_ok=True)
-            job_sh = os.path.join(LOG_DIR, f"{job_id}.sh")
-            job_log = os.path.join(LOG_DIR, f"{job_id}.log")
-            job_status = os.path.join(LOG_DIR, f"{job_id}.status")
+    elif action == "upload":
+        media_type = form.getvalue("media_type", "movies").strip()
+        folder_name = form.getvalue("folder_name", "Upload_PC").strip()
+        folder_name = re.sub(r'[^a-zA-Z0-9_\- ]', '_', folder_name).strip()
+        if not folder_name:
+            folder_name = "Upload_PC"
 
-            with open(job_status, "w") as f:
-                f.write(json.dumps({"status": "RUNNING", "total": 1, "completed": 0, "current": folder_name, "error": None}))
+        target_dir = os.path.join(MOVIES_DIR if media_type == "movies" else PICTURES_DIR, folder_name)
+        os.makedirs(target_dir, exist_ok=True)
 
-            with open(job_sh, "w") as f:
-                f.write("#!/bin/sh\n")
-                f.write(f"cd '{target_dir}'\n")
-                f.write(f"echo '[GDRIVE] Avvio download file {g_id}...' > '{job_log}'\n")
-                # Download diretto file gdrive con curl/python
-                f.write(f"curl -sSL -A 'Mozilla/5.0' 'https://drive.usercontent.google.com/download?id={g_id}&export=download&confirm=t' -o '{folder_name}.mp4' >> '{job_log}' 2>&1\n")
-                f.write(f"python3 -c 'import json; p=\"{job_status}\"; d=json.load(open(p)); d[\"status\"]=\"DONE\"; d[\"completed\"]=1; d[\"current\"]=\"\"; json.dump(d, open(p, \"w\"))'\n")
-                f.write("/usr/bin/minidlna -R 2>/dev/null || /etc/init.d/minidlna restart >/dev/null 2>&1\n")
+        if "file" not in form:
+            send_json({"error": "Nessun file ricevuto"}, 400)
 
-            os.chmod(job_sh, 0o755)
-            subprocess.Popen([job_sh], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        file_items = form["file"]
+        if not isinstance(file_items, list):
+            file_items = [file_items]
 
-            send_json({
-                "status": "STARTED",
-                "job_id": job_id,
-                "target_dir": target_dir,
-                "total_files": 1
-            })
+        saved_files = []
+        for fi in file_items:
+            if fi.filename:
+                fn = os.path.basename(fi.filename)
+                fn = re.sub(r'[^a-zA-Z0-9_.\- ]', '_', fn)
+                dest_path = os.path.join(target_dir, fn)
+                with open(dest_path, "wb") as out_f:
+                    while True:
+                        chunk = fi.file.read(65536)
+                        if not chunk:
+                            break
+                        out_f.write(chunk)
+                saved_files.append(fn)
+
+        subprocess.run(["/usr/bin/minidlna", "-R"], capture_output=True)
+        send_json({
+            "status": "UPLOADED",
+            "folder": folder_name,
+            "count": len(saved_files),
+            "files": saved_files
+        })
 
     elif action == "status":
         job_id = form.getvalue("job_id", "").strip()
@@ -259,7 +263,6 @@ def main():
             send_json({"error": str(e)}, 500)
 
     elif action == "list_folders":
-        # Elenca le cartelle esistenti con numero file e dimensione
         def get_dir_info(base_dir):
             res = []
             if not os.path.exists(base_dir):
@@ -290,7 +293,6 @@ def main():
         })
 
     elif action == "delete_folder":
-        import shutil
         media_type = form.getvalue("media_type", "").strip()
         folder_name = form.getvalue("folder_name", "").strip()
 
@@ -300,16 +302,14 @@ def main():
         base_dir = MOVIES_DIR if media_type == "movies" else PICTURES_DIR
         target_path = os.path.abspath(os.path.join(base_dir, folder_name))
 
-        # Sicurezza path traversal
         if not target_path.startswith(os.path.abspath(base_dir)):
-            send_json({"error": "Accesso non autorizzato fuori dalla directory media"}, 403)
+            send_json({"error": "Accesso non autorizzato"}, 403)
 
         if not os.path.exists(target_path):
             send_json({"error": "Cartella non trovata"}, 404)
 
         try:
             shutil.rmtree(target_path)
-            # Forza scansione minidlna
             subprocess.run(["/usr/bin/minidlna", "-R"], capture_output=True)
             send_json({"status": "DELETED", "message": f"Cartella '{folder_name}' rimossa con successo."})
         except Exception as e:

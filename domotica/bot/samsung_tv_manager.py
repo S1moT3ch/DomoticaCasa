@@ -248,6 +248,32 @@ def on_set_mute(device_id, mute):
                     pass
     return True, mute
 
+def apri_telecamere_tv(device_id):
+    """Accende la TV (se spenta) e apre il browser sulla schermata NVR tv.html"""
+    tv_info = TVS.get(device_id)
+    if not tv_info: return
+    print(f"[TV] Richiesta apertura NVR Telecamere per {tv_info['name']}")
+    wake_tv(device_id)
+
+    def worker():
+        url = "http://192.168.1.162:8080/tv.html"
+        for attempt in range(1, 6):
+            time.sleep(2)
+            tv_obj = get_tv(device_id) or reconnect_tv(device_id)
+            if tv_obj:
+                try:
+                    tv_obj.open_browser(url)
+                    print(f"[TV] Browser aperto con successo su {url} per {tv_info['name']}")
+                    return
+                except Exception as ex:
+                    try:
+                        tv_obj.run_app("org.tizen.browser", "NATIVE_LAUNCH", url)
+                        print(f"[TV] Fallback run_app riuscito per {tv_info['name']}")
+                        return
+                    except Exception as ex2:
+                        print(f"[TV] Tentativo {attempt}/5 apertura browser non riuscito: {ex2}")
+    threading.Thread(target=worker, daemon=True).start()
+
 def on_change_channel(device_id, channel_name):
     tv_info = TVS.get(device_id)
     
@@ -260,6 +286,15 @@ def on_change_channel(device_id, channel_name):
         nome_canale = str(channel_name)
         
     print(f"[Alexa] Richiesta Cambio Canale a '{nome_canale}' (numero: '{numero_canale}') per {tv_info['name']}")
+
+    ch_name_str = str(nome_canale).strip().lower()
+    ch_num_str = str(numero_canale).strip()
+
+    # Se l'utente chiede "telecamere", "telecamera", "camera", "nvr" o canale 99
+    parole_telecamera = ["telecamer", "telecamera", "telecamere", "camera", "cam", "videosorveglianza", "nvr"]
+    if any(w in ch_name_str for w in parole_telecamera) or ch_num_str in ("99", "999"):
+        apri_telecamere_tv(device_id)
+        return True, channel_name
     tv = get_tv(device_id)
     if tv:
         def esegui_cambio_canale(dev_id, ch_name, ch_num):
@@ -385,6 +420,10 @@ def on_mqtt_message(client, userdata, msg):
         
     if payload.lower() == "power_on" or payload.lower() == "power":
         wake_tv(target_id)
+        return
+
+    if payload.lower() in ("open_cameras", "cameras", "telecamere", "cam"):
+        apri_telecamere_tv(target_id)
         return
         
     tv = get_tv(target_id)

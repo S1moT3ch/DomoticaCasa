@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#000000">
+    <title>NVR Telecamere - TV Live</title>
+    <!-- Hls.js locale con fallback CDN -->
+    <script src="hls.min.js"></script>
+    <script>
+        if (typeof Hls === 'undefined') {
+            document.write('<scr' + 'ipt src="https://cdn.jsdelivr.net/npm/hls.js@latest"></scr' + 'ipt>');
+        }
+    </script>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        body, html {
+            width: 100vw;
+            height: 100vh;
+            background-color: #000000;
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden;
+        }
+
+        /* BANNER DI DEBUG PER ERRORI JS (VISIBILE SOLO SE C'E' UN ERRORE) */
+        #errorBanner {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #ff0000;
+            color: #ffffff;
+            padding: 10px 16px;
+            font-size: 14px;
+            font-weight: bold;
+            z-index: 99999;
+            text-align: center;
+        }
+
+        /* CONTAINER DEL VIDEO UNICO (Hardware Accelerated) */
+        .video-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #000000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1;
+        }
+
+        video {
+            width: 100vw;
+            height: 100vh;
+            object-fit: contain;
+            background: #000000;
+        }
+
+        /* BARRA SUPERIORE (OSD HEADER) */
+        .osd-header {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0) 100%);
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .cam-badge-group {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .live-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #e50914;
+            color: #ffffff;
+            font-weight: 800;
+            font-size: 13px;
+            letter-spacing: 1px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            text-transform: uppercase;
+        }
+
+        .live-dot {
+            width: 8px;
+            height: 8px;
+            background: #ffffff;
+            border-radius: 50%;
+            animation: pulse 1.2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.3; transform: scale(0.8); }
+            100% { opacity: 1; transform: scale(1); }
+        }
+
+        .cam-title {
+            font-size: 26px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            color: #ffffff;
+            text-shadow: 0 2px 8px rgba(0,0,0,0.9);
+        }
+
+        .tour-mode-badge {
+            font-size: 13px;
+            font-weight: 600;
+            color: #00ff66;
+            background: rgba(0, 50, 20, 0.7);
+            border: 1px solid #00aa44;
+            padding: 4px 10px;
+            border-radius: 20px;
+            letter-spacing: 0.5px;
+            backdrop-filter: blur(4px);
+        }
+
+        .tour-mode-badge.paused {
+            color: #ffcc00;
+            background: rgba(60, 50, 0, 0.7);
+            border-color: #bb9900;
+        }
+
+        .osd-clock {
+            text-align: right;
+        }
+
+        .clock-time {
+            font-size: 28px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 1px;
+            color: #ffffff;
+            text-shadow: 0 2px 8px rgba(0,0,0,0.9);
+        }
+
+        .clock-date {
+            font-size: 12px;
+            color: #cccccc;
+            text-transform: capitalize;
+        }
+
+        /* BARRA INFERIORE (OSD FOOTER) */
+        .osd-footer {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            background: linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0) 100%);
+            z-index: 10;
+        }
+
+        /* LISTA TELECAMERE (PILLS) */
+        .cam-pills {
+            display: flex;
+            gap: 12px;
+        }
+
+        .cam-pill {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(20, 20, 20, 0.85);
+            border: 2px solid #333333;
+            color: #aaaaaa;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            backdrop-filter: blur(4px);
+            transition: all 0.2s;
+        }
+
+        .cam-pill .pill-num {
+            background: #333333;
+            color: #ffffff;
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .cam-pill.active {
+            border-color: #007bff;
+            background: rgba(0, 100, 255, 0.25);
+            color: #ffffff;
+            transform: scale(1.05);
+        }
+
+        .cam-pill.active .pill-num {
+            background: #007bff;
+        }
+
+        /* GUIDA TELECOMANDO */
+        .remote-guide {
+            font-size: 12px;
+            color: #888888;
+            text-align: right;
+            line-height: 1.6;
+        }
+        .remote-guide span {
+            color: #ffffff;
+            background: #252525;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        /* PROGRESS BAR DEL TOUR (TEMPO AL CAMBIO TELECAMERA) */
+        .tour-progress-bar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 4px;
+            background: #007bff;
+            width: 0%;
+            z-index: 20;
+            transition: width 0.1s linear;
+        }
+
+        /* MINIATURE LIVE IN BASSO A DESTRA (SNAPSHOT JPEG - Zero decoder load) */
+        .thumbs-container {
+            position: absolute;
+            right: 24px;
+            bottom: 70px;
+            display: flex;
+            gap: 12px;
+            z-index: 10;
+        }
+
+        .thumb-box {
+            width: 140px;
+            height: 79px;
+            background: #111111;
+            border: 2px solid #333333;
+            border-radius: 6px;
+            overflow: hidden;
+            position: relative;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.8);
+            transition: transform 0.2s, border-color 0.2s;
+        }
+
+        .thumb-box:hover {
+            border-color: #007bff;
+            transform: scale(1.04);
+        }
+
+        .thumb-box img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            background: #000000;
+        }
+
+        .thumb-label {
+            position: absolute;
+            bottom: 3px;
+            left: 4px;
+            background: rgba(0,0,0,0.7);
+            color: #ffffff;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 1px 5px;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="errorBanner"></div>
+
+    <!-- UNICO PLAYER VIDEO (Hardware Pipeline Nativa Tizen) -->
+    <div class="video-container" id="videoContainer">
+        <video id="tvVideo" muted playsinline autoplay></video>
+    </div>
+
+    <!-- OSD HEADER -->
+    <div class="osd-header" id="osdHeader">
+        <div class="cam-badge-group">
+            <div class="live-tag">
+                <div class="live-dot"></div>
+                <span>LIVE</span>
+            </div>
+            <div class="cam-title" id="camTitle">Inizializzazione...</div>
+            <div class="tour-mode-badge" id="tourBadge">🔄 TOUR ATTIVO (8s)</div>
+        </div>
+
+        <div class="osd-clock">
+            <div class="clock-time" id="clockTime">--:--:--</div>
+            <div class="clock-date" id="clockDate">-- -- ----</div>
+        </div>
+    </div>
+
+    <!-- MINIATURE LIVE DELLE ALTRE 2 CAM (Snapshot JPEG) -->
+    <div class="thumbs-container" id="thumbsContainer">
+        <div class="thumb-box" id="thumbBoxA" onclick="switchCameraByIndex(thumbAIndex)">
+            <img id="thumbImgA" src="cam2_live/last.jpg" alt="Preview">
+            <div class="thumb-label" id="thumbLabelA">Box</div>
+        </div>
+        <div class="thumb-box" id="thumbBoxB" onclick="switchCameraByIndex(thumbBIndex)">
+            <img id="thumbImgB" src="cam3_live/last.jpg" alt="Preview">
+            <div class="thumb-label" id="thumbLabelB">Corridoio</div>
+        </div>
+    </div>
+
+    <!-- OSD FOOTER -->
+    <div class="osd-footer" id="osdFooter">
+        <div class="cam-pills">
+            <div class="cam-pill active" id="pill0" onclick="selectCamera(0, true)">
+                <span class="pill-num">1</span>
+                <span>Soggiorno</span>
+            </div>
+            <div class="cam-pill" id="pill1" onclick="selectCamera(1, true)">
+                <span class="pill-num">2</span>
+                <span>Box</span>
+            </div>
+            <div class="cam-pill" id="pill2" onclick="selectCamera(2, true)">
+                <span class="pill-num">3</span>
+                <span>Corridoio</span>
+            </div>
+        </div>
+
+        <div class="remote-guide">
+            Telecomando: <span>1</span> <span>2</span> <span>3</span> Cambia Camera<br>
+            <span>OK</span> / <span>0</span> Pausa / Riprendi Tour<br>
+            <span>◄</span> <span>►</span> Precedente / Successiva
+        </div>
+    </div>
+
+    <!-- BARRA TIMER TOUR -->
+    <div class="tour-progress-bar" id="tourProgress"></div>
+
+    <script>
+        // CATCH-ALL PER ERRORI JAVASCRIPT (Compatibilità TV)
+        window.onerror = function(msg, url, line) {
+            var banner = document.getElementById('errorBanner');
+            if (banner) {
+                banner.style.display = 'block';
+                banner.textContent = 'Errore JS [' + line + ']: ' + msg;
+            }
+            return false;
+        };
+
+        // Rilevamento Tizen / Smart TV
+        var isTizen = /Tizen|SmartTV|Samsung/i.test(navigator.userAgent);
+
+        // CONFIGURAZIONE TELECAMERE
+        var CAMERAS = [
+            { id: 'cam1', name: 'CAM 1 - SOGGIORNO', stream: 'cam1_live/live.m3u8', snap: 'cam1_live/last.jpg', short: 'Soggiorno' },
+            { id: 'cam2', name: 'CAM 2 - BOX', stream: 'cam2_live/live.m3u8', snap: 'cam2_live/last.jpg', short: 'Box' },
+            { id: 'cam3', name: 'CAM 3 - CORRIDOIO', stream: 'cam3_live/live.m3u8', snap: 'cam3_live/last.jpg', short: 'Corridoio' }
+        ];
+
+        var currentIndex = 0;
+        var thumbAIndex = 1;
+        var thumbBIndex = 2;
+        var isTourActive = true;
+        var tourDuration = 8000;
+        var tourTimer = null;
+        var progressInterval = null;
+        var progressStart = 0;
+
+        var video = document.getElementById('tvVideo');
+        var camTitle = document.getElementById('camTitle');
+        var tourBadge = document.getElementById('tourBadge');
+        var tourProgress = document.getElementById('tourProgress');
+        var hlsInstance = null;
+
+        // OROLOGIO
+        function updateClock() {
+            var now = new Date();
+            var hh = String(now.getHours()).padStart ? String(now.getHours()).padStart(2, '0') : (now.getHours() < 10 ? '0' + now.getHours() : now.getHours());
+            var mm = String(now.getMinutes()).padStart ? String(now.getMinutes()).padStart(2, '0') : (now.getMinutes() < 10 ? '0' + now.getMinutes() : now.getMinutes());
+            var ss = String(now.getSeconds()).padStart ? String(now.getSeconds()).padStart(2, '0') : (now.getSeconds() < 10 ? '0' + now.getSeconds() : now.getSeconds());
+            
+            var clockEl = document.getElementById('clockTime');
+            if (clockEl) clockEl.textContent = hh + ':' + mm + ':' + ss;
+
+            var dateEl = document.getElementById('clockDate');
+            if (dateEl) {
+                var options = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' };
+                try {
+                    dateEl.textContent = now.toLocaleDateString('it-IT', options);
+                } catch(e) {
+                    dateEl.textContent = now.toDateString();
+                }
+            }
+        }
+        setInterval(updateClock, 1000);
+        updateClock();
+
+        // CARICAMENTO STREAM VIDEO SUL SINGOLO PLAYER
+        function loadStream(streamUrl) {
+            // 1. Resetta e distruggi sempre l'istanza precedente per evitare conflitti di codec tra camere
+            if (hlsInstance) {
+                try {
+                    hlsInstance.stopLoad();
+                    hlsInstance.detachMedia();
+                    hlsInstance.destroy();
+                } catch(e) {}
+                hlsInstance = null;
+            }
+
+            try {
+                video.pause();
+                video.removeAttribute('src');
+                video.load();
+            } catch(e) {}
+
+            video.muted = true;
+            video.playsInline = true;
+
+            // 2. Se siamo su Tizen Smart TV: usa il player hardware nativo
+            if (isTizen) {
+                video.src = streamUrl;
+                var playPromise = video.play();
+                if (playPromise && playPromise.catch) {
+                    playPromise.catch(function(err) {});
+                }
+            }
+            // 3. Su tutti i browser PC / Mac / Chrome / Edge / Firefox: usa Hls.js
+            else if (typeof Hls !== 'undefined' && Hls.isSupported()) {
+                hlsInstance = new Hls({
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    liveSyncDurationCount: 1,
+                    maxBufferLength: 4
+                });
+                hlsInstance.attachMedia(video);
+                hlsInstance.loadSource(streamUrl);
+                hlsInstance.on(Hls.Events.MANIFEST_PARSED, function() {
+                    video.muted = true;
+                    var p = video.play();
+                    if (p && p.catch) p.catch(function(){});
+                });
+                hlsInstance.on(Hls.Events.ERROR, function(evt, data) {
+                    if (data && data.fatal) {
+                        switch (data.type) {
+                            case Hls.ErrorTypes.NETWORK_ERROR:
+                                hlsInstance.startLoad();
+                                break;
+                            case Hls.ErrorTypes.MEDIA_ERROR:
+                                hlsInstance.recoverMediaError();
+                                break;
+                            default:
+                                if (hlsInstance) {
+                                    try { hlsInstance.destroy(); } catch(e){}
+                                    hlsInstance = null;
+                                }
+                                setTimeout(function() { loadStream(streamUrl); }, 1500);
+                                break;
+                        }
+                    }
+                });
+            } else if (video.canPlayType && video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Fallback Safari Apple nativo
+                video.src = streamUrl;
+                var pSafari = video.play();
+                if (pSafari && pSafari.catch) pSafari.catch(function(){});
+            }
+        }
+
+        // CAMBIO TELECAMERA
+        function selectCamera(index, manual) {
+            if (typeof manual === 'undefined') manual = false;
+            currentIndex = (index + CAMERAS.length) % CAMERAS.length;
+            var cam = CAMERAS[currentIndex];
+
+            if (camTitle) camTitle.textContent = cam.name;
+
+            for (var i = 0; i < 3; i++) {
+                var p = document.getElementById('pill' + i);
+                if (p) {
+                    if (i === currentIndex) {
+                        p.className = 'cam-pill active';
+                    } else {
+                        p.className = 'cam-pill';
+                    }
+                }
+            }
+
+            loadStream(cam.stream);
+            updateThumbnails();
+
+            if (manual) {
+                setTourActive(false);
+            } else {
+                startProgressBar();
+            }
+        }
+
+        function switchCameraByIndex(index) {
+            selectCamera(index, true);
+        }
+
+        // AGGIORNAMENTO MINIATURE
+        function updateThumbnails() {
+            var otherIndices = [];
+            for (var i = 0; i < CAMERAS.length; i++) {
+                if (i !== currentIndex) otherIndices.push(i);
+            }
+            thumbAIndex = otherIndices[0];
+            thumbBIndex = otherIndices[1];
+
+            var camA = CAMERAS[thumbAIndex];
+            var camB = CAMERAS[thumbBIndex];
+
+            var labelA = document.getElementById('thumbLabelA');
+            var labelB = document.getElementById('thumbLabelB');
+            if (labelA) labelA.textContent = '[' + (thumbAIndex + 1) + '] ' + camA.short;
+            if (labelB) labelB.textContent = '[' + (thumbBIndex + 1) + '] ' + camB.short;
+
+            var t = new Date().getTime();
+            var imgA = document.getElementById('thumbImgA');
+            var imgB = document.getElementById('thumbImgB');
+            if (imgA) imgA.src = camA.snap + '?t=' + t;
+            if (imgB) imgB.src = camB.snap + '?t=' + t;
+        }
+
+        setInterval(updateThumbnails, 5000);
+
+        // GESTIONE TIMER E PROGRESS BAR DEL TOUR
+        function startProgressBar() {
+            clearInterval(progressInterval);
+            progressStart = new Date().getTime();
+
+            progressInterval = setInterval(function() {
+                if (!isTourActive) {
+                    if (tourProgress) tourProgress.style.width = '0%';
+                    clearInterval(progressInterval);
+                    return;
+                }
+                var elapsed = new Date().getTime() - progressStart;
+                var pct = Math.min(100, (elapsed / tourDuration) * 100);
+                if (tourProgress) tourProgress.style.width = pct + '%';
+            }, 100);
+        }
+
+        function setTourActive(active) {
+            isTourActive = active;
+            clearTimeout(tourTimer);
+            clearInterval(progressInterval);
+
+            if (isTourActive) {
+                if (tourBadge) {
+                    tourBadge.textContent = '🔄 TOUR ATTIVO (8s)';
+                    tourBadge.className = 'tour-mode-badge';
+                }
+                startProgressBar();
+                tourTimer = setTimeout(autoNextCamera, tourDuration);
+            } else {
+                if (tourBadge) {
+                    tourBadge.textContent = '🔒 CAMERA BLOCCATA (Premi OK per Tour)';
+                    tourBadge.className = 'tour-mode-badge paused';
+                }
+                if (tourProgress) tourProgress.style.width = '0%';
+            }
+        }
+
+        function autoNextCamera() {
+            if (!isTourActive) return;
+            selectCamera(currentIndex + 1, false);
+            tourTimer = setTimeout(autoNextCamera, tourDuration);
+        }
+
+        function toggleTour() {
+            setTourActive(!isTourActive);
+        }
+
+        // TELECOMANDO SAMSUNG & TASTIERA
+        window.addEventListener('keydown', function(e) {
+            var key = e.key;
+            var code = e.keyCode || e.which;
+
+            if (key === '1' || code === 49) {
+                selectCamera(0, true);
+            } else if (key === '2' || code === 50) {
+                selectCamera(1, true);
+            } else if (key === '3' || code === 51) {
+                selectCamera(2, true);
+            } else if (key === '0' || code === 48 || key === 'Enter' || code === 13 || key === ' ' || code === 32 || code === 10009 || key === 'Escape') {
+                toggleTour();
+            } else if (key === 'ArrowRight' || code === 39 || key === 'ArrowDown' || code === 40) {
+                selectCamera(currentIndex + 1, true);
+            } else if (key === 'ArrowLeft' || code === 37 || key === 'ArrowUp' || code === 38) {
+                selectCamera(currentIndex - 1, true);
+            }
+        });
+
+        // Sblocco interazione
+        window.addEventListener('click', function() {
+            if (video && video.paused) {
+                video.play().catch(function(){});
+            }
+        });
+
+        // AVVIO INIZIALE
+        selectCamera(0, false);
+        setTourActive(true);
+    </script>
+</body>
+</html>
