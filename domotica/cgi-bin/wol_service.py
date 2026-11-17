@@ -2,8 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 WOL & Remote Shutdown HTTP Service per OpenWrt
-Espone endpoint per accensione (WOL), spegnimento (SSH) e health check.
-Supporta Basic Auth, Token query string e verifica dello stato effettivo (acceso/spento).
+- WOL con selezione OS (Windows / Linux) e verifica attiva dell'avvio (fino a 25s).
+- Endpoint Trampolino /get_next_boot per il riavvio automatico UEFI in Linux.
+- Endpoint /reboot_to_linux per riavviare direttamente in Ubuntu da Windows.
+- Spegnimento controllato con verifica dei programmi e lavori aperti sia per Windows che per Linux.
+- Supporto Basic Auth, Token query string (?key=...) e bypass forzato (?force=true).
 """
 
 import os
@@ -24,6 +27,7 @@ class ThreadedWSGIServer(ThreadingMixIn, WSGIServer):
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_FILE = os.path.abspath(os.path.join(BASE_DIR, "..", "bot", ".env"))
 PORT = 5050
+NEXT_BOOT_FILE = "/tmp/next_boot_os.txt"
 
 _last_mtime = 0
 _cached_env = {}
@@ -50,7 +54,9 @@ def get_config():
     wol_user = _cached_env.get("WOL_USER", "admin")
     pc_mac = _cached_env.get("PC_MAC", "30:C5:99:31:CC:D2")
     pc_ip = _cached_env.get("PC_IP", "192.168.1.205")
-    pc_user = _cached_env.get("PC_USER", "SimoneCantore")
+    pc_user_win = _cached_env.get("PC_USER_WIN") or _cached_env.get("PC_USER", "SimoneCantore")
+    pc_user_linux = _cached_env.get("PC_USER_LINUX") or _cached_env.get("PC_USER", "SimoneCantore")
+    ubuntu_guid = _cached_env.get("UBUNTU_GUID", "{1ac58902-ddea-11f1-9c19-806e6f6e6963}")
     ssh_key = _cached_env.get("SSH_KEY", "/root/.ssh/id_rsa")
 
     return {
@@ -58,13 +64,15 @@ def get_config():
         "AUTH_USER": os.getenv("WOL_USER", wol_user),
         "DEFAULT_MAC": os.getenv("PC_MAC", pc_mac),
         "PC_IP": os.getenv("PC_IP", pc_ip),
-        "PC_USER": os.getenv("PC_USER", pc_user),
+        "PC_USER_WIN": os.getenv("PC_USER_WIN", pc_user_win),
+        "PC_USER_LINUX": os.getenv("PC_USER_LINUX", pc_user_linux),
+        "UBUNTU_GUID": os.getenv("UBUNTU_GUID", ubuntu_guid),
         "SSH_KEY": ssh_key
     }
 
 
 def is_pc_online(ip):
-    """Verifica rapida della presenza in rete del PC."""
+    """Verifica rapida se il PC risponde al ping o alla porta RDP/SSH."""
     try:
         res = subprocess.run(
             ["ping", "-c", "1", "-W", "1", ip],
@@ -77,18 +85,19 @@ def is_pc_online(ip):
     except Exception:
         pass
 
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.4)
-            s.connect((ip, 3389)) # porta RDP
-            return True
-    except Exception:
-        pass
+    for port in (3389, 22):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.4)
+                s.connect((ip, port))
+                return True
+        except Exception:
+            pass
 
     return False
 
 
-def wait_for_pc_state(ip, target_online_state, max_wait=7.0, interval=0.7):
+def wait_for_pc_state(ip, target_online_state, max_wait=25.0, interval=1.0):
     """Attende che il PC raggiunga lo stato desiderato (True=acceso, False=spento)."""
     start_t = time.time()
     while (time.time() - start_t) < max_wait:
@@ -107,76 +116,148 @@ def send_magic_packet(mac_address, broadcast_ip="192.168.1.255", port=9):
     hw_addr = bytes.fromhex(mac_clean)
     magic_packet = b'\xff' * 6 + hw_addr * 16
 
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        for dest in [broadcast_ip, "255.255.255.255"]:
-            try:
-                s.sendto(magic_packet, (dest, port))
-            except Exception:
-                pass
-
-    formatted_mac = ":".join(mac_clean[i:i+2] for i in range(0, 12, 2))
-    try:
-        subprocess.run(
-            ["etherwake", "-i", "br-lan", formatted_mac],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=2
-        )
-    except Exception:
-        pass
-
-    return formatted_mac
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.sendto(magic_packet, (broadcast_ip, port))
 
 
-def run_ssh_command(cmd_str, pc_ip, pc_user="SimoneCantore", key_path="/root/.ssh/id_rsa"):
+def run_ssh_command(ip, user, key, command, timeout=5):
+    """Esegue un comando remoto via SSH usando la chiave specificata."""
     cmd = [
         "ssh",
+        "-i", key,
         "-o", "StrictHostKeyChecking=no",
         "-o", "UserKnownHostsFile=/dev/null",
-        "-o", "ConnectTimeout=4",
-        "-o", "BatchMode=yes"
+        "-o", "BatchMode=yes",
+        "-o", f"ConnectTimeout={min(3, timeout)}",
+        f"{user}@{ip}",
+        command
     ]
-    if os.path.exists(key_path):
-        cmd.extend(["-i", key_path])
-    cmd.extend([f"{pc_user}@{pc_ip}", cmd_str])
-
-    res = subprocess.run(cmd, capture_output=True, text=True, timeout=6)
-    if res.returncode == 0:
-        return True, res.stdout.strip()
-
     try:
-        cmd_db = ["dbclient", "-y"]
-        if os.path.exists(key_path):
-            cmd_db.extend(["-i", key_path])
-        cmd_db.extend([f"{pc_user}@{pc_ip}", cmd_str])
-        res_db = subprocess.run(cmd_db, capture_output=True, text=True, timeout=6)
-        if res_db.returncode == 0:
-            return True, res_db.stdout.strip()
-    except Exception:
-        pass
-
-    err_msg = res.stderr.strip() or res.stdout.strip() or f"Codice errore: {res.returncode}"
-    return False, err_msg
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+        return res.returncode, res.stdout, res.stderr
+    except subprocess.TimeoutExpired:
+        return -1, "", "Timeout SSH execution"
+    except Exception as e:
+        return -2, "", str(e)
 
 
-def check_auth(environ, query_params, config):
-    """Verifica autenticazione: supporta sia Basic Auth che Query Param (?key=...)."""
-    secret = config["SECRET_PASS"]
-    user = config["AUTH_USER"]
+def detect_pc_os(ip, conf):
+    """Rileva se il PC e' attualmente avviato su Windows o Linux."""
+    rc, out, _ = run_ssh_command(ip, conf["PC_USER_LINUX"], conf["SSH_KEY"], "uname -s", timeout=2)
+    if rc == 0 and "Linux" in out:
+        return "linux"
+    return "windows"
 
-    # 1. Parametro URL ?key= o ?token=
-    key = query_params.get("key", query_params.get("token", [None]))[0]
-    if key and key == secret:
+
+def get_open_programs_linux(ip, user, key):
+    """Verifica le applicazioni aperte e sessioni attive su Linux."""
+    check_cmd = """ps -u "$USER" -o comm= 2>/dev/null | sort -u"""
+    rc, out, err = run_ssh_command(ip, user, key, check_cmd, timeout=4)
+    if rc != 0:
+        return False, []
+
+    ignore_list = {
+        'systemd', 'dbus-daemon', 'pulseaudio', 'pipewire', 'wireplumber', 'gnome-shell',
+        'xdg-desktop-portal', 'xdg-document-portal', 'xdg-permission-store', 'gsd-color',
+        'gsd-datetime', 'gsd-keyboard', 'gsd-media-keys', 'gsd-power', 'gsd-print-notifications',
+        'gsd-rfkill', 'gsd-screensaver-proxy', 'gsd-sharing', 'gsd-sound', 'gsd-wacom', 'gsd-xsettings',
+        'ibus-daemon', 'ibus-dconf', 'ibus-extension-gtk3', 'ibus-portal', 'tracker-miner-fs-3',
+        'gvfsd', 'gvfsd-fuse', 'gvfsd-metadata', 'gvfs-udisks2-volume-monitor', 'at-spi-bus-launcher',
+        'at-spi2-registryd', 'ssh-agent', 'sshd', 'bash', 'sh', 'ps', 'sort', 'which'
+    }
+
+    programs = []
+    lines = [line.strip() for line in out.strip().splitlines() if line.strip()]
+    for p in lines:
+        if p not in ignore_list and not p.startswith('gvfs') and not p.startswith('gsd-'):
+            programs.append({"process": p, "title": f"Processo attivo: {p}"})
+
+    # Controlla anche sessioni interattive attive (es. terminali / SSH)
+    rc_w, out_w, _ = run_ssh_command(ip, user, key, "w -h 2>/dev/null", timeout=3)
+    if rc_w == 0 and out_w.strip():
+        for line in out_w.strip().splitlines():
+            parts = line.split()
+            if len(parts) >= 3:
+                programs.append({"process": "terminal_session", "title": f"Utente connesso: {parts[0]} su {parts[1]}"})
+
+    return True, programs
+
+
+def get_open_programs_win(ip, user, key):
+    """Legge all'istante il file .open_apps.json generato dal monitor desktop Windows."""
+    rc, out, err = run_ssh_command(ip, user, key, "type C:\\Users\\canto\\.open_apps.json", timeout=3)
+    if rc == 0 and out.strip():
+        clean_out = out.strip().lstrip('\ufeff').lstrip('ï»¿')
+        try:
+            apps = json.loads(clean_out)
+            if isinstance(apps, list):
+                return True, apps
+        except Exception:
+            pass
+    return True, []
+
+
+def get_open_programs(ip, conf):
+    """Verifica le app aperte sul sistema operativo correntemente attivo."""
+    os_name = detect_pc_os(ip, conf)
+    if os_name == "linux":
+        ok, apps = get_open_programs_linux(ip, conf["PC_USER_LINUX"], conf["SSH_KEY"])
+        return ok, apps, "linux"
+    else:
+        ok, apps = get_open_programs_win(ip, conf["PC_USER_WIN"], conf["SSH_KEY"])
+        return ok, apps, "windows"
+
+
+def perform_shutdown(ip, conf, force=False):
+    """Esegue lo spegnimento sicuro o forzato."""
+    os_name = detect_pc_os(ip, conf)
+    if os_name == "linux":
+        user = conf["PC_USER_LINUX"]
+        cmd = "sudo systemctl poweroff || sudo shutdown -h now"
+    else:
+        user = conf["PC_USER_WIN"]
+        cmd = "shutdown /s /f /t 0"
+
+    rc, out, err = run_ssh_command(ip, user, conf["SSH_KEY"], cmd, timeout=5)
+    return (rc == 0), os_name, err
+
+
+def json_response(start_response, status_code, data):
+    status_str = f"{status_code} OK" if status_code == 200 else f"{status_code} Error"
+    if status_code == 401:
+        status_str = "401 Unauthorized"
+    elif status_code == 400:
+        status_str = "400 Bad Request"
+    elif status_code == 404:
+        status_str = "404 Not Found"
+    elif status_code == 500:
+        status_str = "500 Internal Server Error"
+
+    body = json.dumps(data, indent=2, ensure_ascii=False).encode('utf-8')
+    headers = [
+        ('Content-Type', 'application/json; charset=utf-8'),
+        ('Content-Length', str(len(body)))
+    ]
+    if status_code == 401:
+        headers.append(('WWW-Authenticate', 'Basic realm="WOL Service"'))
+
+    start_response(status_str, headers)
+    return [body]
+
+
+def check_auth(environ, qs, conf):
+    key = qs.get("key", [None])[0]
+    if key and key == conf["SECRET_PASS"]:
         return True
 
-    # 2. HTTP Basic Auth
-    auth = environ.get("HTTP_AUTHORIZATION", "")
-    if auth.startswith("Basic "):
+    auth_header = environ.get('HTTP_AUTHORIZATION')
+    if auth_header and auth_header.startswith('Basic '):
         try:
-            raw = base64.b64decode(auth.split(" ", 1)[1]).decode("utf-8")
-            u, p = raw.split(":", 1)
-            if (u == user or u == "admin") and p == secret:
+            encoded = auth_header.split(' ', 1)[1]
+            decoded = base64.b64decode(encoded).decode('utf-8')
+            u, p = decoded.split(':', 1)
+            if u == conf["AUTH_USER"] and p == conf["SECRET_PASS"]:
                 return True
         except Exception:
             pass
@@ -186,223 +267,206 @@ def check_auth(environ, query_params, config):
 
 def application(environ, start_response):
     try:
-        config = get_config()
-        path = environ.get("PATH_INFO", "")
-        query_str = environ.get("QUERY_STRING", "")
-        params = parse_qs(query_str)
+        conf = get_config()
+        path = environ.get('PATH_INFO', '')
+        qs = parse_qs(environ.get('QUERY_STRING', ''))
 
-        # 1. Radice /
-        if path in ["/", ""]:
-            body = b"WOL & Shutdown Service is running OK\n"
-            start_response("200 OK", [
-                ("Content-Type", "text/plain; charset=utf-8"),
-                ("Content-Length", str(len(body)))
-            ])
+        # 1. Endpoint /get_next_boot (per lo script di trampolino Windows al boot)
+        if path in ('/get_next_boot', '/next_boot'):
+            target_os = "windows"
+            if os.path.exists(NEXT_BOOT_FILE):
+                try:
+                    with open(NEXT_BOOT_FILE, "r") as f:
+                        target_os = f.read().strip()
+                except Exception:
+                    pass
+            # Se era linux, resettiamo a windows per i boot successivi
+            if target_os == "linux":
+                try:
+                    with open(NEXT_BOOT_FILE, "w") as f:
+                        f.write("windows")
+                except Exception:
+                    pass
+            return json_response(start_response, 200, {
+                "status": "ok",
+                "target_os": target_os
+            })
+
+        # 2. Controllo autenticazione per le altre azioni
+        if not check_auth(environ, qs, conf):
+            return json_response(start_response, 401, {
+                "status": "error",
+                "message": "Autenticazione richiesta. Fornisci Basic Auth o parametro ?key=..."
+            })
+
+        # Endpoint Root
+        if path == '/' or path == '':
+            body = b"WOL & Dual-Boot Shutdown Service is running OK"
+            start_response('200 OK', [('Content-Type', 'text/plain'), ('Content-Length', str(len(body)))])
             return [body]
 
-        # 2. /health (e /status, /ping)
-        if path in ["/health", "/status", "/ping"]:
-            pc_on = is_pc_online(config["PC_IP"])
-            res_data = {
+        # Endpoint Health / Status
+        if path in ('/health', '/status'):
+            online = is_pc_online(conf["PC_IP"])
+            detected_os = detect_pc_os(conf["PC_IP"], conf) if online else None
+            return json_response(start_response, 200, {
                 "status": "ok",
                 "service": "wol_service",
-                "pc_online": pc_on,
-                "pc_status": "acceso" if pc_on else "spento",
-                "pc_ip": config["PC_IP"],
-                "pc_user": config["PC_USER"],
-                "default_mac": config["DEFAULT_MAC"]
-            }
-            body = json.dumps(res_data, indent=2).encode("utf-8") + b"\n"
-            start_response("200 OK", [
-                ("Content-Type", "application/json; charset=utf-8"),
-                ("Content-Length", str(len(body))),
-                ("Access-Control-Allow-Origin", "*"),
-                ("Cache-Control", "no-cache")
-            ])
-            return [body]
+                "pc_online": online,
+                "pc_status": "acceso" if online else "spento",
+                "current_os": detected_os,
+                "pc_ip": conf["PC_IP"],
+                "pc_user_win": conf["PC_USER_WIN"],
+                "pc_user_linux": conf["PC_USER_LINUX"],
+                "default_mac": conf["DEFAULT_MAC"]
+            })
 
-        # 3. /test_ssh
-        if path == "/test_ssh":
-            ok, output = run_ssh_command("whoami", config["PC_IP"], config["PC_USER"], config["SSH_KEY"])
-            res_data = {
-                "status": "success" if ok else "error",
-                "action": "test_ssh",
-                "result": output,
-                "pc_ip": config["PC_IP"],
-                "pc_user": config["PC_USER"]
-            }
-            body = json.dumps(res_data, indent=2).encode("utf-8") + b"\n"
-            status_code = "200 OK" if ok else "500 Internal Server Error"
-            start_response(status_code, [
-                ("Content-Type", "application/json; charset=utf-8"),
-                ("Content-Length", str(len(body)))
-            ])
-            return [body]
-
-        # 4. /wol (e /wake) -> Accensione con verifica stato post-invio
-        if path in ["/wol", "/wake"]:
-            if not check_auth(environ, params, config):
-                err_data = {"status": "error", "message": "Accesso negato. Autenticazione richiesta"}
-                body = json.dumps(err_data).encode("utf-8") + b"\n"
-                start_response("401 Unauthorized", [
-                    ("WWW-Authenticate", 'Basic realm="WOL Service"'),
-                    ("Content-Type", "application/json; charset=utf-8"),
-                    ("Content-Length", str(len(body)))
-                ])
-                return [body]
-
-            target_mac = params.get("mac", [config["DEFAULT_MAC"]])[0]
-            
-            # Se era già acceso, ritorna subito
-            already_on = is_pc_online(config["PC_IP"])
-            if already_on:
-                res_data = {
-                    "status": "success",
-                    "action": "wake",
-                    "pc_status": "acceso",
-                    "pc_online": True,
-                    "message": "Il PC era già acceso e raggiungibile",
-                    "mac": target_mac
-                }
-                body = json.dumps(res_data, indent=2).encode("utf-8") + b"\n"
-                start_response("200 OK", [
-                    ("Content-Type", "application/json; charset=utf-8"),
-                    ("Content-Length", str(len(body))),
-                    ("Access-Control-Allow-Origin", "*")
-                ])
-                return [body]
-
-            # Invia Magic Packet
-            try:
-                sent_mac = send_magic_packet(target_mac)
-            except Exception as e:
-                err_data = {"status": "error", "message": str(e)}
-                body = json.dumps(err_data).encode("utf-8") + b"\n"
-                start_response("500 Internal Server Error", [
-                    ("Content-Type", "application/json; charset=utf-8"),
-                    ("Content-Length", str(len(body)))
-                ])
-                return [body]
-
-            # Attende fino a 7.5s per verificare se il PC risponde
-            final_online, elapsed = wait_for_pc_state(config["PC_IP"], True, max_wait=7.5)
-            
-            if final_online:
-                pc_status_str = "acceso"
-                msg_str = f"Magic packet inviato a {sent_mac}. Il PC risulta ora ACCESO (dopo {elapsed}s)"
-            else:
-                pc_status_str = "avvio_in_corso"
-                msg_str = f"Magic packet inviato a {sent_mac}. Avvio del sistema operativo in corso"
-
-            res_data = {
-                "status": "success",
-                "action": "wake",
-                "pc_status": pc_status_str,
-                "pc_online": final_online,
-                "message": msg_str,
-                "mac": sent_mac
-            }
-            body = json.dumps(res_data, indent=2).encode("utf-8") + b"\n"
-            start_response("200 OK", [
-                ("Content-Type", "application/json; charset=utf-8"),
-                ("Content-Length", str(len(body))),
-                ("Access-Control-Allow-Origin", "*")
-            ])
-            return [body]
-
-        # 5. /shutdown (e /off) -> Spegnimento con verifica stato effettivo post-arresto
-        if path in ["/shutdown", "/off"]:
-            if not check_auth(environ, params, config):
-                err_data = {"status": "error", "message": "Accesso negato. Autenticazione richiesta"}
-                body = json.dumps(err_data).encode("utf-8") + b"\n"
-                start_response("401 Unauthorized", [
-                    ("WWW-Authenticate", 'Basic realm="WOL Service"'),
-                    ("Content-Type", "application/json; charset=utf-8"),
-                    ("Content-Length", str(len(body)))
-                ])
-                return [body]
-
-            # Se è già spento prima del comando
-            if not is_pc_online(config["PC_IP"]):
-                res_data = {
-                    "status": "success",
-                    "action": "shutdown",
-                    "pc_status": "spento",
+        # Endpoint /check_apps
+        if path == '/check_apps':
+            online = is_pc_online(conf["PC_IP"])
+            if not online:
+                return json_response(start_response, 200, {
+                    "status": "ok",
                     "pc_online": False,
-                    "message": "Il PC risultava già spento o non raggiungibile in rete"
-                }
-                body = json.dumps(res_data, indent=2).encode("utf-8") + b"\n"
-                start_response("200 OK", [
-                    ("Content-Type", "application/json; charset=utf-8"),
-                    ("Content-Length", str(len(body))),
-                    ("Access-Control-Allow-Origin", "*")
-                ])
-                return [body]
+                    "pc_status": "spento",
+                    "message": "Il PC e' spento o non raggiungibile."
+                })
 
-            # Invia comando di spegnimento via SSH
-            ok, msg = run_ssh_command("shutdown /s /t 0", config["PC_IP"], config["PC_USER"], config["SSH_KEY"])
-            if not ok:
-                err_data = {
+            ok, apps, os_name = get_open_programs(conf["PC_IP"], conf)
+            return json_response(start_response, 200, {
+                "status": "ok",
+                "pc_online": True,
+                "os": os_name,
+                "open_programs": apps,
+                "count": len(apps)
+            })
+
+        # Endpoint /wol (supporta ?os=linux o ?os=windows)
+        if path == '/wol':
+            mac = qs.get("mac", [conf["DEFAULT_MAC"]])[0]
+            req_os = qs.get("os", ["windows"])[0].lower()
+            target_os = "linux" if req_os in ("linux", "ubuntu") else "windows"
+
+            # Salva la preferenza per il trampolino UEFI
+            try:
+                with open(NEXT_BOOT_FILE, "w") as f:
+                    f.write(target_os)
+            except Exception:
+                pass
+
+            send_magic_packet(mac)
+
+            wait_str = qs.get("wait", ["22"])[0]
+            try:
+                wait_timeout = float(wait_str)
+            except ValueError:
+                wait_timeout = 22.0
+
+            is_online, elapsed = wait_for_pc_state(conf["PC_IP"], True, max_wait=wait_timeout)
+            return json_response(start_response, 200, {
+                "status": "ok",
+                "action": "wake_on_lan",
+                "target_os": target_os,
+                "mac": mac,
+                "pc_ip": conf["PC_IP"],
+                "pc_online": is_online,
+                "pc_status": "acceso" if is_online else "in_avvio",
+                "boot_seconds": elapsed,
+                "message": f"WOL inviato (target: {target_os}). PC {'acceso con successo' if is_online else 'in fase di avvio'}."
+            })
+
+        # Endpoint /reboot_to_linux (riavvio immediato in Ubuntu da Windows)
+        if path == '/reboot_to_linux':
+            online = is_pc_online(conf["PC_IP"])
+            if not online:
+                return json_response(start_response, 400, {
                     "status": "error",
-                    "action": "shutdown",
-                    "message": "Impossibile eseguire lo spegnimento via SSH",
-                    "error_details": msg
-                }
-                body = json.dumps(err_data).encode("utf-8") + b"\n"
-                start_response("500 Internal Server Error", [
-                    ("Content-Type", "application/json; charset=utf-8"),
-                    ("Content-Length", str(len(body)))
-                ])
-                return [body]
+                    "message": "Il PC e' spento. Usa /wol?os=linux per accenderlo direttamente in Ubuntu."
+                })
 
-            # Attende fino a 7.5s che il PC si spenga effettivamente (smetta di rispondere al ping)
-            final_online, elapsed = wait_for_pc_state(config["PC_IP"], False, max_wait=7.5)
+            os_name = detect_pc_os(conf["PC_IP"], conf)
+            if os_name == "linux":
+                return json_response(start_response, 200, {
+                    "status": "ok",
+                    "message": "Il PC e' gia' avviato in Linux Ubuntu!"
+                })
 
-            if not final_online:
-                pc_status_str = "spento"
-                msg_str = f"Comando di spegnimento eseguito. Il PC risulta ora SPENTO (dopo {elapsed}s)"
+            cmd = f'bcdedit /set "{{fwbootmgr}}" bootsequence "{conf["UBUNTU_GUID"]}" && shutdown /r /f /t 0'
+            rc, out, err = run_ssh_command(conf["PC_IP"], conf["PC_USER_WIN"], conf["SSH_KEY"], cmd, timeout=6)
+            if rc == 0:
+                return json_response(start_response, 200, {
+                    "status": "ok",
+                    "action": "reboot_to_linux",
+                    "message": "Sequenza UEFI Ubuntu impostata. Riavvio in corso..."
+                })
             else:
-                pc_status_str = "arresto_in_corso"
-                msg_str = "Comando di spegnimento inviato con successo. Chiusura processi e arresto in corso"
+                return json_response(start_response, 500, {
+                    "status": "error",
+                    "message": "Impossibile impostare la sequenza di avvio UEFI.",
+                    "details": err or out
+                })
 
-            res_data = {
-                "status": "success",
+        # Endpoint /shutdown
+        if path == '/shutdown':
+            force = qs.get("force", ["false"])[0].lower() in ("true", "1", "yes")
+            online = is_pc_online(conf["PC_IP"])
+            if not online:
+                return json_response(start_response, 200, {
+                    "status": "ok",
+                    "action": "shutdown",
+                    "pc_online": False,
+                    "pc_status": "spento",
+                    "message": "Il PC e' gia' spento."
+                })
+
+            # Verifica programmi e lavori aperti
+            ok, apps, os_name = get_open_programs(conf["PC_IP"], conf)
+            if apps and not force:
+                return json_response(start_response, 200, {
+                    "status": "error",
+                    "reason": "shutdown_blocked",
+                    "os": os_name,
+                    "message": f"Spegnimento bloccato: sono presenti {len(apps)} programmi o finestre aperti su {os_name}.",
+                    "open_programs": apps,
+                    "count": len(apps),
+                    "hint": "Invia ?force=true per forzare lo spegnimento immediato."
+                })
+
+            # Esecuzione spegnimento
+            success, os_name, err = perform_shutdown(conf["PC_IP"], conf, force=force)
+            if not success:
+                return json_response(start_response, 500, {
+                    "status": "error",
+                    "os": os_name,
+                    "message": "Errore durante l'esecuzione del comando di spegnimento.",
+                    "details": err
+                })
+
+            is_online, elapsed = wait_for_pc_state(conf["PC_IP"], False, max_wait=20.0)
+            return json_response(start_response, 200, {
+                "status": "ok",
                 "action": "shutdown",
-                "pc_status": pc_status_str,
-                "pc_online": final_online,
-                "message": msg_str
-            }
-            body = json.dumps(res_data, indent=2).encode("utf-8") + b"\n"
-            start_response("200 OK", [
-                ("Content-Type", "application/json; charset=utf-8"),
-                ("Content-Length", str(len(body))),
-                ("Access-Control-Allow-Origin", "*")
-            ])
-            return [body]
+                "os": os_name,
+                "forced": force,
+                "pc_online": is_online,
+                "pc_status": "spento" if not is_online else "in_spegnimento",
+                "shutdown_seconds": elapsed,
+                "message": f"PC ({os_name}) {'spento con successo' if not is_online else 'ancora in fase di arresto'}."
+            })
 
-        if path == "/favicon.ico":
-            start_response("204 No Content", [("Content-Length", "0")])
-            return []
-
-        err_data = {"status": "error", "message": f"Endpoint '{path}' non trovato"}
-        body = json.dumps(err_data).encode("utf-8") + b"\n"
-        start_response("404 Not Found", [
-            ("Content-Type", "application/json; charset=utf-8"),
-            ("Content-Length", str(len(body)))
-        ])
-        return [body]
+        return json_response(start_response, 404, {"status": "error", "message": "Endpoint non trovato"})
 
     except Exception as e:
-        err_data = {"status": "error", "server_error": str(e)}
-        body = json.dumps(err_data).encode("utf-8") + b"\n"
-        start_response("500 Internal Server Error", [
-            ("Content-Type", "application/json; charset=utf-8"),
-            ("Content-Length", str(len(body)))
-        ])
-        return [body]
+        return json_response(start_response, 500, {
+            "status": "error",
+            "message": "Errore interno del server",
+            "details": str(e)
+        })
 
-
-if __name__ == "__main__":
-    print(f"[*] WOL & Shutdown Service in ascolto su http://0.0.0.0:{PORT}", flush=True)
-    server = make_server("0.0.0.0", PORT, application, server_class=ThreadedWSGIServer)
-    server.serve_forever()
+if __name__ == '__main__':
+    print(f"Starting WOL & Dual-Boot Service on port {PORT}...")
+    server = make_server('0.0.0.0', PORT, application, server_class=ThreadedWSGIServer)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nService stopped.")

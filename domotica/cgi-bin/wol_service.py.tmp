@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import os, sys, json, time, socket, re, base64, subprocess
+from urllib.parse import parse_qs
+from socketserver import ThreadingMixIn
+from wsgiref.simple_server import WSGIServer, make_server
+
+class ThreadedWSGIServer(ThreadingMixIn, WSGIServer):
+    daemon_threads = True
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ENV_FILE = os.path.abspath(os.path.join(BASE_DIR, "..", "bot", ".env"))
+PORT = 5050
+
+def get_config():
+    wol_pass = "DomoticaCasa!26"
+    pc_mac = "30:C5:99:31:CC:D2"
+    pc_ip = "192.168.1.205"
+    pc_user = "SimoneCantore"
+    ssh_key = "/root/.ssh/id_rsa"
+    if os.path.exists(ENV_FILE):
+        try:
+            with open(ENV_FILE, "r", encoding="utf-8") as f:
+                for line in f:
+                    line_str = line.strip()
+                    if line_str.startswith("WOL_PASS="): wol_pass = line_str.split("=", 1)[1].strip("'\"")
+                    elif line_str.startswith("PC_USER="): pc_user = line_str.split("=", 1)[1].strip("'\"")
+                    elif line_str.startswith("PC_IP="): pc_ip = line_str.split("=", 1)[1].strip("'\"")
+        except Exception:
+            pass
+    return {"SECRET_PASS": wol_pass, "PC_IP": pc_ip, "PC_USER": pc_user, "SSH_KEY": ssh_key, "DEFAULT_MAC": pc_mac}
+
+def run_ssh(cmd_str, pc_ip, pc_user, ssh_key):
+    cmd = ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "ConnectTimeout=5", "-o", "BatchMode=yes"]
+    if os.path.exists(ssh_key): cmd.extend(["-i", ssh_key])
+    cmd.extend([f"{pc_user}@{pc_ip}", cmd_str])
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    return res.stdout.strip(), res.stderr.strip()
+
+def application(environ, start_response):
+    cfg = get_config()
+    path = environ.get("PATH_INFO", "")
+    
+    if path == "/check_apps":
+        # Run test: what does qwinsta and Get-Process see?
+        out1, err1 = run_ssh("query session", cfg["PC_IP"], cfg["PC_USER"], cfg["SSH_KEY"])
+        ps_test = "$session = (Get-Process -Name explorer -ErrorAction SilentlyContinue | Select-Object -First 1).SessionId; $procs = Get-Process | Where-Object { $_.SessionId -eq $session } | Select-Object -ExpandProperty ProcessName -Unique; $titles = Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object -ExpandProperty MainWindowTitle; [PSCustomObject]@{ ExplorerSession = $session; ProcsInSession = ($procs -join ','); TitlesFound = ($titles -join ' | ') } | ConvertTo-Json -Compress"
+        b64 = base64.b64encode(ps_test.encode("utf-16le")).decode("ascii")
+        out2, err2 = run_ssh(f"powershell.exe -NoProfile -NonInteractive -EncodedCommand {b64}", cfg["PC_IP"], cfg["PC_USER"], cfg["SSH_KEY"])
+        
+        data = {
+            "status": "diagnostic",
+            "query_session": out1,
+            "ps_diagnostic": out2,
+            "ps_err": err2
+        }
+        body = json.dumps(data, indent=2).encode("utf-8") + b"\n"
+        start_response("200 OK", [("Content-Type", "application/json")])
+        return [body]
+
+    start_response("200 OK", [("Content-Type", "text/plain")])
+    return [b"OK\n"]
+
+if __name__ == "__main__":
+    server = make_server("0.0.0.0", PORT, application, server_class=ThreadedWSGIServer)
+    server.serve_forever()
