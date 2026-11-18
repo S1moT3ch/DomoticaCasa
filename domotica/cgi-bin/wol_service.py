@@ -17,6 +17,7 @@ import socket
 import re
 import base64
 import subprocess
+import csv
 from urllib.parse import parse_qs
 from socketserver import ThreadingMixIn
 from wsgiref.simple_server import WSGIServer, make_server
@@ -122,8 +123,24 @@ def send_magic_packet(mac_address, broadcast_ip="192.168.1.255", port=9):
 
 
 def run_ssh_command(ip, user, key, command, timeout=5):
-    """Esegue un comando remoto via SSH usando la chiave specificata."""
-    cmd = [
+    """Esegue un comando remoto via SSH supportando sia dbclient (Dropbear) che ssh (OpenSSH)."""
+    # 1. Prova prima con dbclient (client SSH nativo di OpenWrt con chiavi Dropbear)
+    cmd_db = [
+        "dbclient",
+        "-y",
+        "-i", key,
+        f"{user}@{ip}",
+        command
+    ]
+    try:
+        res_db = subprocess.run(cmd_db, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+        if res_db.returncode == 0:
+            return 0, res_db.stdout, res_db.stderr
+    except Exception:
+        pass
+
+    # 2. Se dbclient fallisce o non e' presente, prova con OpenSSH ssh
+    cmd_ssh = [
         "ssh",
         "-i", key,
         "-o", "StrictHostKeyChecking=no",
@@ -134,8 +151,13 @@ def run_ssh_command(ip, user, key, command, timeout=5):
         command
     ]
     try:
-        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
-        return res.returncode, res.stdout, res.stderr
+        res = subprocess.run(cmd_ssh, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+        if res.returncode == 0:
+            return 0, res.stdout, res.stderr
+        else:
+            # Ritorna l'output di errore se anche ssh fallisce
+            err_msg = res.stderr or (res_db.stderr if 'res_db' in locals() else "Errore esecuzione SSH")
+            return res.returncode, res.stdout, err_msg
     except subprocess.TimeoutExpired:
         return -1, "", "Timeout SSH execution"
     except Exception as e:
@@ -143,7 +165,20 @@ def run_ssh_command(ip, user, key, command, timeout=5):
 
 
 def detect_pc_os(ip, conf):
-    """Rileva se il PC e' attualmente avviato su Windows o Linux."""
+    """Rileva se il PC e' attualmente avviato su Windows o Linux analizzando il banner del demone SSH sulla porta 22."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1.0)
+            s.connect((ip, 22))
+            banner = s.recv(256).decode('utf-8', errors='ignore')
+            if 'ubuntu' in banner.lower() or 'linux' in banner.lower():
+                return "linux"
+            elif 'windows' in banner.lower():
+                return "windows"
+    except Exception:
+        pass
+
+    # Fallback con verifica uname
     rc, out, _ = run_ssh_command(ip, conf["PC_USER_LINUX"], conf["SSH_KEY"], "uname -s", timeout=2)
     if rc == 0 and "Linux" in out:
         return "linux"
@@ -152,50 +187,236 @@ def detect_pc_os(ip, conf):
 
 def get_open_programs_linux(ip, user, key):
     """Verifica le applicazioni aperte e sessioni attive su Linux."""
-    check_cmd = """ps -u "$USER" -o comm= 2>/dev/null | sort -u"""
+    check_cmd = """ps -u "$USER" -o comm=,args= 2>/dev/null"""
     rc, out, err = run_ssh_command(ip, user, key, check_cmd, timeout=4)
     if rc != 0:
         return False, []
 
-    ignore_list = {
-        'systemd', 'dbus-daemon', 'pulseaudio', 'pipewire', 'wireplumber', 'gnome-shell',
-        'xdg-desktop-portal', 'xdg-document-portal', 'xdg-permission-store', 'gsd-color',
-        'gsd-datetime', 'gsd-keyboard', 'gsd-media-keys', 'gsd-power', 'gsd-print-notifications',
-        'gsd-rfkill', 'gsd-screensaver-proxy', 'gsd-sharing', 'gsd-sound', 'gsd-wacom', 'gsd-xsettings',
-        'ibus-daemon', 'ibus-dconf', 'ibus-extension-gtk3', 'ibus-portal', 'tracker-miner-fs-3',
-        'gvfsd', 'gvfsd-fuse', 'gvfsd-metadata', 'gvfs-udisks2-volume-monitor', 'at-spi-bus-launcher',
-        'at-spi2-registryd', 'ssh-agent', 'sshd', 'bash', 'sh', 'ps', 'sort', 'which'
+    ignore_prefixes = (
+        'gnome-', 'gsd-', 'evolution-', 'xdg-', 'ibus-', 'goa-', 'at-spi',
+        'pipewire', 'wireplumber', 'systemd', 'tracker-', 'gvfs', 'snapd-',
+        'dconf-', 'localsearch', 'gcr-', 'update-notifier', 'user-session-',
+        'gdm-', '(sd-pam)', 'gjs', 'dbus-', 'pulseaudio', 'glycin-', 'ubuntu-'
+    )
+    ignore_exact = {
+        'ssh', 'sshd', 'sshd-session', 'bash', 'sh', 'ps', 'sort', 'which',
+        'dbclient', 'login', 'sudo', 'systemd', 'dbus-daemon', 'ssh-agent',
+        'gcr-ssh-agent', 'ptyxis-agent', 'snap', 'mpris-proxy', 'bwrap',
+        'fusermount', 'fusermount3', 'whoopsie', 'wsdd'
     }
 
     programs = []
+    seen = set()
     lines = [line.strip() for line in out.strip().splitlines() if line.strip()]
-    for p in lines:
-        if p not in ignore_list and not p.startswith('gvfs') and not p.startswith('gsd-'):
+    for line in lines:
+        parts = line.split(None, 1)
+        if not parts:
+            continue
+        p = parts[0]
+        args = parts[1] if len(parts) > 1 else ""
+
+        if p in ignore_exact:
+            continue
+        if any(p.startswith(prefix) for prefix in ignore_prefixes):
+            continue
+
+        # Filtra demoni interni Python (come wsdd per network discovery Samba o updater di sistema)
+        if p in ('python', 'python3'):
+            if any(x in args for x in ('wsdd', '/usr/share/', '/usr/lib/', 'update-manager', 'ubuntu-drivers')):
+                continue
+
+        # Filtra qualsiasi helper interno eseguito da libexec o da snap desktop integration
+        if '/usr/libexec/' in args or '/snap/snapd-desktop-integration/' in args:
+            continue
+
+        if p not in seen:
+            seen.add(p)
             programs.append({"process": p, "title": f"Processo attivo: {p}"})
 
-    # Controlla anche sessioni interattive attive (es. terminali / SSH)
+    # Controlla terminali e sessioni interattive attive (escludendo sessioni di sistema e OpenWrt)
     rc_w, out_w, _ = run_ssh_command(ip, user, key, "w -h 2>/dev/null", timeout=3)
     if rc_w == 0 and out_w.strip():
         for line in out_w.strip().splitlines():
             parts = line.split()
-            if len(parts) >= 3:
-                programs.append({"process": "terminal_session", "title": f"Utente connesso: {parts[0]} su {parts[1]}"})
+            if len(parts) >= 2:
+                # Escludi le connessioni provenienti dal router stesso
+                if "192.168.1.162" in line:
+                    continue
+                tty_name = parts[1]
+                # tty1, tty2, seat0 rappresentano la sessione del desktop grafico, non terminali aperti
+                if tty_name.startswith("tty") or tty_name.startswith("seat"):
+                    continue
+                # Cattura solo pseudo-terminali reali aperti (pts/0, pts/1, ecc.)
+                if tty_name.startswith("pts"):
+                    user_name = parts[0]
+                    programs.append({"process": "terminal_session", "title": f"Terminale aperto: {user_name} su {tty_name}"})
 
     return True, programs
 
 
+def parse_windows_tasklist_csv(csv_text):
+    """Analizza l'output CSV di tasklist /v estraendo le finestre utente e schede browser attive."""
+    try:
+        lines = [l for l in csv_text.strip().splitlines() if l.strip().startswith('"')]
+        if not lines:
+            return []
+        reader = csv.reader(lines)
+        rows = list(reader)
+        if not rows or len(rows) < 2:
+            return []
+
+        header = [h.strip().lower() for h in rows[0]]
+        proc_idx = 0
+        title_idx = -1
+        for idx, col in enumerate(header):
+            if 'immagine' in col or 'image' in col:
+                proc_idx = idx
+            elif 'titolo' in col or 'window' in col or 'title' in col:
+                title_idx = idx
+
+        if title_idx == -1:
+            title_idx = 8 if len(rows[0]) > 8 else -1
+
+        if title_idx == -1:
+            return []
+
+        ignore_procs = {
+            'dwm.exe', 'svchost.exe', 'taskhostw.exe', 'searchhost.exe',
+            'startmenuexperiencehost.exe', 'shellexperiencehost.exe', 'shellhost.exe',
+            'lockapp.exe', 'textinputhost.exe', 'widgetboard.exe', 'widgetservice.exe',
+            'runtimebroker.exe', 'splwow64.exe', 'unsecapp.exe', 'conhost.exe',
+            'atieclxx.exe', 'crossdeviceresume.exe', 'crossdeviceservice.exe',
+            'phoneexperiencehost.exe', 'reconsentnotification.exe', 'desktopextension.exe',
+            'monotificationux.exe', 'appactions.exe', 'overlayhelper.exe',
+            'rtkauduservice64.exe', 'hpsystemeventutilitybackground.exe', 'hpmedianetwork.exe',
+            'amdrsserv.exe', 'onedrive.sync.service.exe', 'onedrive.exe', 'onedrivelauncher.exe',
+            'sihost.exe', 'ctfmon.exe', 'vncagent.exe', 'rvncagent.exe',
+            'rvncserverui.exe', 'vncserverui.exe', 'synptenh.exe', 'securityhealthsystray.exe',
+            'radeonsoftware.exe', 'amdrssrcext.exe', 'csrss.exe', 'winlogon.exe', 'fontdrvhost.exe',
+            'logonui.exe', 'amdpmfserviceuser.exe', 'asusoptimizationstartuptask.exe',
+            'defendersessionhelper.exe', 'rdpclip.exe', 'rdpinput.exe', 'smartscreen.exe',
+            'igoswserver.exe', 'aixhost.exe', 'clicktodo.exe', 'aihost.exe', 'ghelper.exe',
+            'msedgewebview2.exe', 'microsoftstartfeedprovider.exe', 'avpui.exe', 'b4notify.exe',
+            'tabtip.exe', 'tailscale-ipn.exe', 'hppusg.exe', 'kpm_tray.exe', 'cceventapp.exe',
+            'cncmd.exe', 'applicationframehost.exe', 'ksdeui.exe', 'explorer.exe', 'amdow.exe'
+        }
+        ignore_titles = {
+            'n/d', 'n/a', '', 'olemainthreadwndname', 'olechannelwnd',
+            'task host window', 'dwm notification window', 'smartdc', 'wuiconwindow',
+            'amd:dvr-capturingwindow', 'kpm.rootwindow', 'ad_msg_wnd',
+            'realvnc connect inbound - chat', 'nuova notifica', 'cerca', 'start',
+            'widget di windows', 'esperienza input di windows',
+            'schermata di blocco predefinita di windows', 'rapporti', 'kaspersky vpn',
+            'controlcenter4', 'brother status monitor', 'quick settings', 'copilot quick view',
+            'impostazioni', 'settings'
+        }
+
+        programs = []
+        seen = set()
+        for row in rows[1:]:
+            if len(row) <= max(proc_idx, title_idx):
+                continue
+            p = row[proc_idx].strip()
+            t = row[title_idx].strip()
+            p_lower = p.lower()
+            t_lower = t.lower()
+
+            if p_lower in ignore_procs:
+                if p_lower == 'explorer.exe' and t and t_lower not in ignore_titles and t_lower not in ('n/d', 'n/a', ''):
+                    display_title = f"Esplora risorse: {t}"
+                else:
+                    continue
+            else:
+                if t and t_lower not in ignore_titles and t_lower not in ('n/d', 'n/a'):
+                    display_title = t
+                elif t_lower in ('n/d', 'n/a', ''):
+                    display_title = f"Programma attivo: {p}"
+                else:
+                    continue
+
+            if t.startswith('.NET-Broadcast') or t.startswith('GDI+ Window'):
+                continue
+            if 'notification' in t_lower:
+                continue
+
+            if p_lower not in seen:
+                seen.add(p_lower)
+                programs.append({
+                    "process": p,
+                    "title": display_title
+                })
+
+        return programs
+    except Exception:
+        return []
+
+
 def get_open_programs_win(ip, user, key):
-    """Legge all'istante il file .open_apps.json generato dal monitor desktop Windows."""
-    rc, out, err = run_ssh_command(ip, user, key, "type C:\\Users\\canto\\.open_apps.json", timeout=3)
-    if rc == 0 and out.strip():
-        clean_out = out.strip().lstrip('\ufeff').lstrip('ï»¿')
+    """Verifica le finestre e schede aperte su Windows in tempo reale."""
+    # 1. Metodo primario e più accurato: lettura del file .open_apps.json
+    # generato in tempo reale (ogni 3s) da monitor_apps.ps1 nella sessione grafica utente
+    cmd_json = 'type "%USERPROFILE%\\.open_apps.json" 2>nul || type "C:\\Users\\canto\\.open_apps.json" 2>nul'
+    rc_f, out_f, _ = run_ssh_command(ip, user, key, cmd_json, timeout=3)
+    if rc_f == 0 and out_f.strip():
+        clean_out = out_f.strip().lstrip('\ufeff').lstrip('ï»¿')
         try:
-            apps = json.loads(clean_out)
-            if isinstance(apps, list):
-                return True, apps
+            raw_data = json.loads(clean_out)
+            if isinstance(raw_data, dict):
+                raw_apps = [raw_data]
+            elif isinstance(raw_data, list):
+                raw_apps = raw_data
+            else:
+                raw_apps = []
+
+            ignore_titles = {
+                'n/d', 'n/a', '', 'olemainthreadwndname', 'olechannelwnd',
+                'task host window', 'dwm notification window', 'smartdc', 'wuiconwindow',
+                'amd:dvr-capturingwindow', 'kpm.rootwindow', 'ad_msg_wnd',
+                'realvnc connect inbound - chat', 'nuova notifica', 'cerca', 'start',
+                'widget di windows', 'esperienza input di windows',
+                'schermata di blocco predefinita di windows', 'rapporti', 'kaspersky vpn',
+                'controlcenter4', 'brother status monitor', 'quick settings', 'copilot quick view',
+                'impostazioni', 'settings'
+            }
+            ignore_procs = {
+                'applicationframehost', 'systemsettings', 'explorer', 'textinputhost',
+                'searchhost', 'startmenuexperiencehost', 'shellexperiencehost',
+                'lockapp', 'ghelper', 'onedrive', 'rtkuwp_rs5', 'backgroundtaskhost',
+                'powershell', 'cmd', 'conhost'
+            }
+            apps = []
+            seen = set()
+            for item in raw_apps:
+                if not isinstance(item, dict):
+                    continue
+                p = str(item.get('process', '')).strip()
+                t = str(item.get('title', '')).strip()
+                if not p:
+                    continue
+                p_lower = p.lower()
+                t_lower = t.lower()
+                if p_lower in ignore_procs and (not t or t_lower in ignore_titles):
+                    continue
+                if t_lower in ignore_titles:
+                    continue
+                if p_lower not in seen:
+                    seen.add(p_lower)
+                    apps.append({
+                        "process": p,
+                        "title": t if t else f"Programma attivo: {p}"
+                    })
+            return True, apps
         except Exception:
             pass
-    return True, []
+
+    # 2. Fallback: interrogazione tasklist /v se .open_apps.json non è leggibile
+    cmd_task = 'tasklist /v /fi "SESSION gt 0" /fo csv'
+    rc, out, err = run_ssh_command(ip, user, key, cmd_task, timeout=10)
+    if rc == 0 and out.strip():
+        apps = parse_windows_tasklist_csv(out)
+        return True, apps
+
+    return False, []
 
 
 def get_open_programs(ip, conf):
@@ -214,7 +435,7 @@ def perform_shutdown(ip, conf, force=False):
     os_name = detect_pc_os(ip, conf)
     if os_name == "linux":
         user = conf["PC_USER_LINUX"]
-        cmd = "sudo systemctl poweroff || sudo shutdown -h now"
+        cmd = "sudo /usr/bin/systemctl poweroff || sudo /usr/sbin/poweroff || sudo /usr/sbin/shutdown -h now"
     else:
         user = conf["PC_USER_WIN"]
         cmd = "shutdown /s /f /t 0"
@@ -406,6 +627,27 @@ def application(environ, start_response):
                     "details": err or out
                 })
 
+        # Endpoint /check_programs (controllo app aperte senza spegnere)
+        if path in ('/check_programs', '/programs'):
+            online = is_pc_online(conf["PC_IP"])
+            if not online:
+                return json_response(start_response, 200, {
+                    "status": "ok",
+                    "pc_online": False,
+                    "pc_status": "spento",
+                    "open_programs": [],
+                    "count": 0
+                })
+            ok, apps, os_name = get_open_programs(conf["PC_IP"], conf)
+            return json_response(start_response, 200, {
+                "status": "ok",
+                "pc_online": True,
+                "os": os_name,
+                "open_programs": apps,
+                "count": len(apps),
+                "safe_to_shutdown": len(apps) == 0
+            })
+
         # Endpoint /shutdown
         if path == '/shutdown':
             force = qs.get("force", ["false"])[0].lower() in ("true", "1", "yes")
@@ -421,6 +663,15 @@ def application(environ, start_response):
 
             # Verifica programmi e lavori aperti
             ok, apps, os_name = get_open_programs(conf["PC_IP"], conf)
+            if not ok and not force:
+                return json_response(start_response, 500, {
+                    "status": "error",
+                    "reason": "check_failed",
+                    "os": os_name,
+                    "message": f"Impossibile verificare con sicurezza lo stato dei programmi aperti su {os_name} (errore o timeout SSH).",
+                    "hint": "Invia ?force=true per forzare lo spegnimento immediato."
+                })
+
             if apps and not force:
                 return json_response(start_response, 200, {
                     "status": "error",
