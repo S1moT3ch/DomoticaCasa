@@ -2249,86 +2249,40 @@ class TelegramBot:
                     if usb_chart_path and os.path.exists(usb_chart_path):
                         self.send_photo(chat_id, usb_chart_path)
         elif cmd == "/wh":
-            import subprocess
             args = text_clean.split()[1:]
-            
-            aliases_path = os.path.join(os.path.dirname(__file__), 'aliases.json')
-            aliases = {}
-            if os.path.exists(aliases_path):
-                try:
-                    with open(aliases_path, 'r', encoding='utf-8') as f:
-                        aliases = json.load(f)
-                except Exception:
-                    pass
-            
-            active_macs = []
             pm = getattr(self, "presence_manager", None) or (self.tracker and getattr(self.tracker, "presence_manager", None))
-            if pm:
-                active_macs = [m.lower().strip() for m in pm.get_active_macs(max_age=15)]
-            else:
-                try:
-                    # Selezioniamo i MAC da verificare (tutti o solo quello richiesto)
-                    macs_to_check = []
-                    if not args:
-                        macs_to_check = [m.lower().strip() for m in aliases.values()]
-                    else:
-                        target_alias = args[0].lower()
-                        for a, m in aliases.items():
-                            if a.lower() == target_alias:
-                                macs_to_check.append(m.lower().strip())
-                                break
-
-                    if macs_to_check:
-                        mac_regex = "|".join(macs_to_check)
-                        
-                        # Lo script bash sul router:
-                        # 1. Trova gli IP associati ai MAC che ci interessano.
-                        # 2. Cancella forzatamente le vecchie cache ARP per quegli IP.
-                        # 3. Lancia un ping per forzare la rete a cercare di nuovo quei dispositivi.
-                        # 4. Attende 2 secondi e stampa la tabella ARP aggiornata.
-                        sh_script = (
-                            f"ips=$(cat /proc/net/arp | grep -iE '{mac_regex}' | awk '{{print $1}}'); "
-                            "for ip in $ips; do ip neigh flush to $ip 2>/dev/null || arp -d $ip 2>/dev/null; ping -c 1 $ip >/dev/null 2>&1 & done; "
-                            "sleep 2; "
-                            "cat /proc/net/arp"
-                        )
-
-                        arp_output = subprocess.check_output(
-                            ['ssh', '-i', getattr(config, 'OPENWRT_SSH_KEY', '/root/.ssh/id_openwrt'), '-o', 'StrictHostKeyChecking=no', '-o', 'ConnectTimeout=3', '-o', 'BatchMode=yes', 'root@192.168.1.1', sh_script],
-                            stderr=subprocess.DEVNULL, timeout=6
-                        ).decode('utf-8').lower()
-
-                        for line in arp_output.split('\n'):
-                            parts = line.split()
-                            # Se è 0x0 significa che il ping non ha risvegliato l'ARP (dispositivo disconnesso)
-                            if len(parts) >= 4 and parts[2] != "0x0" and parts[2] != "00":
-                                active_macs.append(parts[3])
-
-                except Exception as e:
-                    print(f"[!] Errore Active ARP scan: {e}")
-                    pass
-
+            
             msg_lines = []
-            if not args:
-                if aliases:
-                    for alias, mac in aliases.items():
-                        if mac.lower().strip() in active_macs:
-                            msg_lines.append(f"{alias} 🟢")
-                        else:
-                            msg_lines.append(f"{alias} 🔴")
+            if pm:
+                status_dict = pm.get_all_aliases_status(max_age=10)
+                if not args:
+                    for alias, info in status_dict.items():
+                        icon = "🟢" if info.get("online") else "🔴"
+                        msg_lines.append(f"{alias} {icon}")
+                else:
+                    target = args[0].strip().lower()
+                    target_found = False
+                    for alias, info in status_dict.items():
+                        if alias.lower() == target:
+                            icon = "🟢" if info.get("online") else "🔴"
+                            msg_lines.append(f"{alias} {icon}")
+                            target_found = True
+                            break
+                    if not target_found:
+                        is_online, _, _ = pm.is_device_online(target, max_age=10)
+                        icon = "🟢" if is_online else "🔴"
+                        msg_lines.append(f"{args[0]} {icon}")
             else:
-                target_alias = args[0].lower()
-                target_mac = None
-                for a, m in aliases.items():
-                    if a.lower() == target_alias:
-                        target_mac = m.lower().strip()
-                        break
-                
-                if target_mac:
-                    if target_mac in active_macs:
-                        msg_lines.append(f"{target_alias} 🟢")
-                    else:
-                        msg_lines.append(f"{target_alias} 🔴")
+                aliases_path = os.path.join(os.path.dirname(__file__), 'aliases.json')
+                aliases = {}
+                if os.path.exists(aliases_path):
+                    try:
+                        with open(aliases_path, 'r', encoding='utf-8') as f:
+                            aliases = json.load(f)
+                    except Exception:
+                        pass
+                for a in aliases:
+                    msg_lines.append(f"{a} ❓")
 
             if msg_lines:
                 self.send_message(chat_id, "\n".join(msg_lines))

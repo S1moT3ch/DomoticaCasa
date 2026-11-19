@@ -7,13 +7,40 @@ const HEARTBEAT_SECRET = process.env.HEARTBEAT_SECRET || 'SecretHeartbeatKey2026
 const TIMEOUT_SECONDS = parseInt(process.env.TIMEOUT_SECONDS || '150', 10);
 const REMOTE_SIGNATURE = "\n\n📡 _Messaggio inviato dal Server Remoto_";
 
+function formatDuration(totalSeconds) {
+    const sec = Math.max(0, Math.round(totalSeconds));
+    if (sec < 60) {
+        return `${sec} second${sec === 1 ? 'o' : 'i'}`;
+    }
+    const hours = Math.floor(sec / 3600);
+    const minutes = Math.floor((sec % 3600) / 60);
+    const remainingSec = sec % 60;
+
+    const parts = [];
+    if (hours > 0) {
+        parts.push(`${hours} ${hours === 1 ? 'ora' : 'ore'}`);
+    }
+    if (minutes > 0) {
+        parts.push(`${minutes} ${minutes === 1 ? 'minuto' : 'minuti'}`);
+    }
+    if (remainingSec > 0 && hours === 0) {
+        parts.push(`${remainingSec} ${remainingSec === 1 ? 'secondo' : 'secondi'}`);
+    }
+
+    if (parts.length === 1) return parts[0];
+    if (parts.length === 2) return `${parts[0]} e ${parts[1]}`;
+    return `${parts[0]}, ${parts[1]} e ${parts[2]}`;
+}
+
 async function sendTelegramAlert(message, subscribers = null) {
     if (!TELEGRAM_BOT_TOKEN) return;
 
-    let chatIds = TELEGRAM_CHAT_ID ? [TELEGRAM_CHAT_ID] : [];
+    let rawIds = TELEGRAM_CHAT_ID ? [TELEGRAM_CHAT_ID] : [];
     if (Array.isArray(subscribers) && subscribers.length > 0) {
-        chatIds = subscribers;
+        rawIds = subscribers;
     }
+    // Deduplica rigorosamente i chat_id per evitare doppi invii
+    const chatIds = [...new Set(rawIds.map(id => String(id).trim()))].filter(Boolean);
 
     const fullMessage = message.includes("Server Remoto") ? message : `${message}${REMOTE_SIGNATURE}`;
     const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
@@ -76,6 +103,7 @@ module.exports = async (req, res) => {
         if (!state.alerts) state.alerts = {};
         if (!state.recent_outage_events) state.recent_outage_events = [];
         if (!state.unreported_events_for_server) state.unreported_events_for_server = [];
+        if (!state.last_recovery_alert_sent) state.last_recovery_alert_sent = {};
 
         // Aggiornamento heartbeat globale e per nodo
         state.last_heartbeat = now;
@@ -115,6 +143,7 @@ module.exports = async (req, res) => {
 
             const startedAt = state.outage_started_at || (now - TIMEOUT_SECONDS * 1000);
             const durationSec = Math.max(1, Math.round((now - startedAt) / 1000));
+            delete state.outage_started_at;
 
             const blackoutEvent = {
                 type: 'blackout',
@@ -127,27 +156,25 @@ module.exports = async (req, res) => {
                 duration_seconds: durationSec
             };
 
-            delete state.outage_started_at;
-            delete state.server_down_started_at;
-            delete state.firewall_down_started_at;
-
             state.recent_outage_events.unshift(blackoutEvent);
             if (state.recent_outage_events.length > 20) {
                 state.recent_outage_events = state.recent_outage_events.slice(0, 20);
             }
+            recoveredEventsForResponse.push(blackoutEvent);
 
-            if (node === 'server') {
-                recoveredEventsForResponse.push(blackoutEvent);
-            } else {
-                state.unreported_events_for_server.push(blackoutEvent);
+            const lastBoRecovery = state.last_recovery_alert_sent?.outage || 0;
+            if (now - lastBoRecovery >= 120000) {
+                state.last_recovery_alert_sent.outage = now;
+                state.last_recovery_alert_sent.server = now;
+                state.last_recovery_alert_sent.firewall = now;
+
+                await sendTelegramAlert(
+                    "🟢 *RIPRISTINO CORRENTE ELETTRICA (BLACKOUT SUPERATO)*\n\n" +
+                    "⚡ La rete elettrica ed i nodi domotici di casa sono di nuovo **ONLINE** e funzionanti!\n" +
+                    `⏱️ _Durata interruzione_: *${formatDuration(durationSec)}*`,
+                    activeSubscribers
+                );
             }
-
-            await sendTelegramAlert(
-                "🟢 *RIPRISTINO CORRENTE ELETTRICA*\n\n" +
-                "⚡ La rete elettrica ed i nodi domotici di casa sono di nuovo **ONLINE** e funzionanti!\n" +
-                `⏱️ _Durata interruzione_: *${durationSec} secondi*`,
-                activeSubscribers
-            );
         }
 
         // 3. GESTIONE RIPRISTINO SINGOLO NODO
@@ -181,12 +208,20 @@ module.exports = async (req, res) => {
                 state.unreported_events_for_server.push(nodeEvent);
             }
 
-            await sendTelegramAlert(
-                `🟢 *NODO RIPRISTINATO: ${node.toUpperCase()}*\n\n` +
-                `✅ Il nodo *${nodeFriendly}* è di nuovo **ONLINE** e comunica regolarmente.\n` +
-                `⏱️ _Durata disconnessione_: *${durationSec} secondi*`,
-                activeSubscribers
-            );
+            // Anti-duplicazione: invia l'alert solo se non già inviato negli ultimi 120 secondi
+            const lastNodeRecovery = state.last_recovery_alert_sent?.[node] || 0;
+            if (now - lastNodeRecovery >= 120000) {
+                state.last_recovery_alert_sent[node] = now;
+
+                await sendTelegramAlert(
+                    `🟢 *NODO RIPRISTINATO: ${node.toUpperCase()}*\n\n` +
+                    `✅ Il nodo *${nodeFriendly}* è di nuovo **ONLINE** e comunica regolarmente.\n` +
+                    `⏱️ _Durata disconnessione_: *${formatDuration(durationSec)}*`,
+                    activeSubscribers
+                );
+            } else {
+                console.log(`[DEBOUNCE] Notifica ripristino per ${node} soppressa (già inviata ${Math.round((now - lastNodeRecovery) / 1000)}s fa).`);
+            }
         }
 
         // Eventi pendenti per il server
@@ -202,7 +237,10 @@ module.exports = async (req, res) => {
             if (lastOtherTs) {
                 const otherElapsed = Math.round((now - parseInt(lastOtherTs, 10)) / 1000);
                 const isOtherAlertActive = state.alerts[otherNode];
-                if (otherElapsed > TIMEOUT_SECONDS && !isOtherAlertActive) {
+                // Tolleranza minima di 180s per il firewall per evitare falsi allarmi su cron al minuto
+                const effectiveTimeout = otherNode === 'firewall' ? Math.max(TIMEOUT_SECONDS, 180) : TIMEOUT_SECONDS;
+
+                if (otherElapsed > effectiveTimeout && !isOtherAlertActive) {
                     state.alerts[otherNode] = true;
                     state[`${otherNode}_down_started_at`] = parseInt(lastOtherTs, 10);
 
@@ -210,7 +248,7 @@ module.exports = async (req, res) => {
                     const currentFriendly = node === 'server' ? 'Home Server' : 'Firewall';
                     await sendTelegramAlert(
                         `⚠️ *NODO DOMOTICO OFFLINE: ${otherNode.toUpperCase()}*\n\n` +
-                        `🚨 ATTENZIONE: Il nodo *${otherFriendly}* non invia il segnale di vita (heartbeat) da oltre *${otherElapsed} secondi*.\n\n` +
+                        `🚨 ATTENZIONE: Il nodo *${otherFriendly}* non invia il segnale di vita (heartbeat) da oltre *${formatDuration(otherElapsed)}*.\n\n` +
                         `ℹ️ Il nodo *${currentFriendly}* è invece regolarmente *ONLINE*, quindi alimentazione e connettività sono presenti.\n` +
                         `Possibile blocco, riavvio o anomalia del singolo nodo.`,
                         activeSubscribers
