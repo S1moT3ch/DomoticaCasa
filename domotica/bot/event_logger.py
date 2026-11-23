@@ -124,6 +124,10 @@ class EventLogger:
         if temperature is None and humidity is None:
             return
 
+        # Previene la registrazione di letture anomale a 0°C dovute a disconnessioni del cloud Netatmo
+        if (temperature is not None and float(temperature) <= 0.0) or str(mode).lower() == "offline":
+            return
+
         # Arrotonda il timestamp al multiplo di 15 minuti più vicino (es. 23:00, 23:15, 23:30, 23:45)
         dt_now = datetime.now()
         discard_min = dt_now.minute % 15
@@ -203,6 +207,38 @@ class EventLogger:
             "min_hum": min(hums) if hums else 0.0,
             "max_hum": max(hums) if hums else 0.0
         }
+
+    
+    def has_zero_climate_data(self, hours=24):
+        """Verifica se nelle ultime N ore ci sono record con temperatura <= 0 o umidità <= 0"""
+        history = self.get_climate_history(hours=hours)
+        for h in history:
+            t = h[1]
+            hum = h[2]
+            try:
+                if (t is not None and float(t) <= 0.0) or (hum is not None and float(hum) <= 0.0):
+                    return True
+            except (ValueError, TypeError):
+                continue
+        return False
+
+    def clean_zero_climate_data(self, hours=48):
+        """Elimina i record con temperatura <= 0 o umidità <= 0 registrati nelle ultime N ore"""
+        with self.lock:
+            try:
+                with self._get_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        DELETE FROM climate_telemetry
+                        WHERE (temperature <= 0 OR humidity <= 0 OR mode = 'offline')
+                          AND datetime(timestamp) >= datetime('now', ? || ' hours')
+                    """, (f"-{hours}",))
+                    deleted_count = cursor.rowcount
+                    conn.commit()
+                    return True, deleted_count
+            except Exception as e:
+                print(f"[!] Errore cancellazione valori zero clima: {e}")
+                return False, 0
 
     def log_server_telemetry(self, cpu_load, ram_usage_mb, temp_c, swap_usage_mb=None, usb_used_pct=None):
         """Registra i dati vitali del server ogni 15 minuti"""

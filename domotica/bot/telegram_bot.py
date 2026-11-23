@@ -26,6 +26,8 @@ class TelegramBot:
         self.pending_page_inputs = {}  # { chat_id: {"print_id": print_id, "msg_id": msg_id, "time": timestamp} }
         self.pending_copies_inputs = {}  # { chat_id: {"print_id": print_id, "msg_id": msg_id, "time": timestamp} }
         self.pending_resumes = {}  # { resume_id: {...} }
+        self.pending_schedule_inputs = {}   # { chat_id: {"time": timestamp, "msg_id": msg_id} }
+        self.pending_schedule_confirms = {} # { chat_id: {"title": title, "slots": slots, "payload": payload, "time": timestamp} }
 
     def set_admin_bot(self, admin_bot):
         self.admin_bot = admin_bot
@@ -267,9 +269,292 @@ class TelegramBot:
             [
                 {"text": "🚪 Apri Serranda Garage", "callback_data": "cmd_ask:Serranda:on:Serranda Garage (Apri)"},
                 {"text": "🚗 Apri Cancello Garage", "callback_data": "cmd_ask:Cancello:on:Cancello Garage (Apri)"}
+            ],
+            [
+                {"text": "🔥 Boost Termostato 30m", "callback_data": "cmd_ask:Bticino:boost_30:Termostato BTicino (Boost 30m)"},
+                {"text": "📅 Termostato Auto", "callback_data": "cmd_ask:Bticino:auto:Termostato BTicino (Auto)"}
             ]
         ]
         return {"inline_keyboard": keyboard}
+
+    
+    def _build_thermostat_keyboard(self, has_zeros=False):
+        keyboard = [
+            [
+                {"text": "⏱️ Boost 30m", "callback_data": "cmd_ask:Bticino:boost_30:Termostato BTicino (Boost 30m)"},
+                {"text": "⏱️ Boost 60m", "callback_data": "cmd_ask:Bticino:boost_60:Termostato BTicino (Boost 60m)"},
+                {"text": "⏱️ Boost 90m", "callback_data": "cmd_ask:Bticino:boost_90:Termostato BTicino (Boost 90m)"}
+            ],
+            [
+                {"text": "🔥 Set 20°C", "callback_data": "cmd_ask:Bticino:manual_20.0:Termostato BTicino (20°C)"},
+                {"text": "🔥 Set 21°C", "callback_data": "cmd_ask:Bticino:manual_21.0:Termostato BTicino (21°C)"},
+                {"text": "🔥 Set 22°C", "callback_data": "cmd_ask:Bticino:manual_22.0:Termostato BTicino (22°C)"}
+            ],
+            [
+                {"text": "📅 Programma Giornaliero", "callback_data": "view_schedule"},
+                {"text": "📅 Ripristina Programma Auto", "callback_data": "cmd_ask:Bticino:auto:Termostato BTicino (Programma Auto)"}
+            ]
+        ]
+        if has_zeros:
+            keyboard.append([
+                {"text": "🧹 Elimina valori anomali a 0°C", "callback_data": "ask_clean_climate_zeros"}
+            ])
+        return {"inline_keyboard": keyboard}
+
+
+    SCHEDULE_PRESETS = {
+        "lavoro": {
+            "title": "🏢 Lavoro (Standard)",
+            "desc": "20.0°C mattina e sera, 17.5°C di giorno, 16.5°C di notte",
+            "slots": [("00:00", 16.5), ("06:30", 20.0), ("08:30", 17.5), ("17:00", 20.5), ("22:30", 16.5)]
+        },
+        "sempre_casa": {
+            "title": "🏠 Sempre a Casa",
+            "desc": "20.5°C costante dalle 07:00 alle 23:00, 17.0°C di notte",
+            "slots": [("00:00", 17.0), ("07:00", 20.5), ("23:00", 17.0)]
+        },
+        "eco": {
+            "title": "❄️ Risparmio Eco",
+            "desc": "19.0°C mattina e sera, 16.5°C di giorno, 16.0°C di notte",
+            "slots": [("00:00", 16.0), ("07:00", 19.0), ("09:00", 16.5), ("18:00", 19.5), ("22:30", 16.0)]
+        }
+    }
+
+    def _parse_daily_slots_input(self, text):
+        pattern = r'(\d{1,2}:\d{2})\s*(?:-|->|:)?\s*(\d{1,2}(?:[.,]\d+)?)\s*(?:°?C)?'
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        if not matches or len(matches) < 2:
+            return False, "Devi specificare almeno 2 fasce orarie (es. `06:30 20.0, 08:30 17.5, 17:00 20.5, 22:30 16.5`)."
+
+        slots = []
+        seen_times = set()
+        for t_str, temp_str in matches:
+            parts = t_str.split(':')
+            h, m = int(parts[0]), int(parts[1])
+            if h > 23 or m > 59:
+                return False, f"Orario non valido: `{t_str}` (le ore devono essere 00-23, minuti 00-59)."
+            norm_t = f"{h:02d}:{m:02d}"
+            if norm_t in seen_times:
+                return False, f"Orario duplicato: `{norm_t}`."
+            seen_times.add(norm_t)
+
+            try:
+                temp = round(float(temp_str.replace(',', '.')), 1)
+            except ValueError:
+                return False, f"Temperatura non valida: `{temp_str}`."
+
+            if not (7.0 <= temp <= 30.0):
+                return False, f"Temperatura `{temp}°C` fuori scala: consentita tra 7.0°C e 30.0°C."
+
+            slots.append((norm_t, temp))
+
+        slots.sort(key=lambda x: x[0])
+        if slots[0][0] != "00:00":
+            slots.insert(0, ("00:00", slots[-1][1]))
+
+        return True, slots
+
+    def _build_netatmo_schedule_payload(self, schedule_id, schedule_name, daily_slots, room_id="3893347837", home_id="67eeee4f0bc3615f0a0e016a", away_temp=12.0, hg_temp=7.0):
+        unique_temps = []
+        for t_str, temp in daily_slots:
+            if temp not in unique_temps:
+                unique_temps.append(temp)
+
+        zones = []
+        temp_to_zone_id = {}
+        for idx, temp in enumerate(unique_temps):
+            z_name = f"T_{temp:.1f}°C"
+            z_type = 0 if temp >= 20.0 else (5 if temp >= 17.0 else 1)
+            zones.append({
+                "id": idx,
+                "name": z_name,
+                "type": z_type,
+                "rooms": [{"id": str(room_id), "therm_setpoint_temperature": float(temp)}]
+            })
+            temp_to_zone_id[temp] = idx
+
+        daily_offsets = []
+        for t_str, temp in daily_slots:
+            parts = t_str.split(":")
+            m_day = int(parts[0]) * 60 + int(parts[1])
+            daily_offsets.append((m_day, temp_to_zone_id[temp]))
+
+        daily_offsets.sort(key=lambda x: x[0])
+        if daily_offsets[0][0] != 0:
+            daily_offsets.insert(0, (0, daily_offsets[-1][1]))
+
+        timetable = []
+        for day in range(7):
+            base_offset = day * 1440
+            for m_day, z_id in daily_offsets:
+                timetable.append({
+                    "m_offset": base_offset + m_day,
+                    "zone_id": z_id
+                })
+
+        payload = {
+            "home_id": home_id,
+            "schedule_id": schedule_id,
+            "name": schedule_name,
+            "away_temp": away_temp,
+            "hg_temp": hg_temp,
+            "zones": zones,
+            "timetable": timetable
+        }
+        return payload
+
+    def _format_schedule_text(self, schedule):
+        if not schedule or not isinstance(schedule, dict):
+            return "⚠️ *Nessun dato di programmazione disponibile al momento.*\n_Richiedo l'aggiornamento via MQTT al bridge BTicino..._"
+
+        name = schedule.get("name") or "Pianificazione Riscaldamento"
+        zones = schedule.get("zones", [])
+        timetable = schedule.get("timetable", [])
+        away_t = schedule.get("away_temp", 12.0)
+        hg_t = schedule.get("hg_temp", 7.0)
+
+        zone_temps = {}
+        for z in zones:
+            z_id = z.get("id")
+            t = None
+            if z.get("rooms_temp"):
+                t = z["rooms_temp"][0].get("temp")
+            elif z.get("rooms"):
+                t = z["rooms"][0].get("therm_setpoint_temperature")
+            zone_temps[z_id] = (z.get("name") or f"Zona {z_id}", float(t) if t is not None else 20.0)
+
+        day_idx = datetime.now().weekday()
+        day_name = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"][day_idx]
+
+        day_start = day_idx * 1440
+        day_end = (day_idx + 1) * 1440
+
+        today_slots = [s for s in timetable if day_start <= s.get("m_offset", 0) < day_end]
+
+        if not today_slots and timetable:
+            prev_slots = [s for s in timetable if s.get("m_offset", 0) < day_end]
+            if prev_slots:
+                last_s = prev_slots[-1]
+                today_slots = [{"m_offset": day_start, "zone_id": last_s["zone_id"]}]
+            else:
+                today_slots = [timetable[0]]
+
+        today_slots.sort(key=lambda x: x.get("m_offset", 0))
+
+        lines = [
+            "📅 *PIANIFICAZIONE TERMOSTATO BTICINO*",
+            f"📋 *Nome Programma:* `{name}`",
+            f"🗓️ *Fasce Orarie Oggi ({day_name}):*\n"
+        ]
+
+        if len(today_slots) <= 1:
+            z_id = today_slots[0].get("zone_id") if today_slots else None
+            z_name, z_t = zone_temps.get(z_id, ("Costante", 19.0))
+            icon = "🔥" if z_t >= 20.0 else ("🌿" if z_t >= 17.0 else "❄️")
+            lines.append(f"• `00:00 - 24:00` ➔ {icon} *{z_t:.1f}°C* ({z_name})")
+        else:
+            for i, s in enumerate(today_slots):
+                m_curr = s.get("m_offset", 0) - day_start
+                if m_curr < 0:
+                    m_curr = 0
+                h1, mn1 = m_curr // 60, m_curr % 60
+                t_start = f"{h1:02d}:{mn1:02d}"
+
+                if i + 1 < len(today_slots):
+                    m_next = today_slots[i+1].get("m_offset", 0) - day_start
+                    h2, mn2 = m_next // 60, m_next % 60
+                    t_end = f"{h2:02d}:{mn2:02d}"
+                else:
+                    t_end = "24:00"
+
+                z_id = s.get("zone_id")
+                z_name, z_t = zone_temps.get(z_id, ("Standard", 20.0))
+                icon = "🔥" if z_t >= 20.0 else ("🌿" if z_t >= 17.0 else "❄️")
+                lines.append(f"• `{t_start} - {t_end}` ➔ {icon} *{z_t:.1f}°C* ({z_name})")
+
+        lines.append(f"\n❄️ *Antigelo:* `{hg_t}°C`  |  🚶 *Fuori Casa:* `{away_t}°C`")
+        return "\n".join(lines)
+
+    def _show_schedule_view(self, chat_id, edit_message_id=None):
+        sched = getattr(self.tracker, "termostato_schedule", None)
+        if not sched:
+            try:
+                if self.tracker.client and self.tracker.connected:
+                    self.tracker.client.publish("Termostato.bticino/request_schedule", "GET")
+                    time.sleep(1.2)
+                    sched = getattr(self.tracker, "termostato_schedule", None)
+            except Exception:
+                pass
+
+        text = self._format_schedule_text(sched)
+        keyboard = {
+            "inline_keyboard": [
+                [
+                    {"text": "🏢 Profilo Lavoro", "callback_data": "sched_preset:lavoro"},
+                    {"text": "🏠 Sempre Casa", "callback_data": "sched_preset:sempre_casa"}
+                ],
+                [
+                    {"text": "❄️ Profilo Eco", "callback_data": "sched_preset:eco"},
+                    {"text": "✏️ Modifica Fasce", "callback_data": "sched_custom_prompt"}
+                ],
+                [
+                    {"text": "🔄 Aggiorna", "callback_data": "sched_refresh"},
+                    {"text": "🔙 Termostato", "callback_data": "cmd_ask_back_thermostat"}
+                ]
+            ]
+        }
+        if edit_message_id:
+            self._edit_message_text(chat_id, edit_message_id, text, reply_markup=keyboard)
+        else:
+            self.send_message(chat_id, text, reply_markup=keyboard)
+
+    def _handle_schedule_input_text(self, chat_id, text):
+        ok, res = self._parse_daily_slots_input(text)
+        if not ok:
+            err_msg = (
+                f"❌ *FORMATO NON VALIDO*\n\n{res}\n\n"
+                "💡 *Formato richiesto:*\n`06:30 20.0, 08:30 17.5, 17:00 20.5, 22:30 16.5`\n\n"
+                "_Invia /annulla per uscire._"
+            )
+            self.send_message(chat_id, err_msg)
+            return
+
+        slots = res
+        sched = getattr(self.tracker, "termostato_schedule", None)
+        s_id = sched.get("id", "67eeee4f0bc3615f0a0e016b") if sched else "67eeee4f0bc3615f0a0e016b"
+        s_name = sched.get("name", "La mia pianificazione programmata del riscaldamento") if sched else "La mia pianificazione programmata del riscaldamento"
+        away_t = sched.get("away_temp", 12.0) if sched else 12.0
+        hg_t = sched.get("hg_temp", 7.0) if sched else 7.0
+
+        payload = self._build_netatmo_schedule_payload(s_id, s_name, slots, away_temp=away_t, hg_temp=hg_t)
+
+        lines = ["📋 *CONFERMA NUOVO PROGRAMMA GIORNALIERO*\n"]
+        lines.append("Verranno applicate le seguenti fasce per tutti i 7 giorni della settimana:\n")
+        for i in range(len(slots)):
+            start_t, temp = slots[i]
+            end_t = slots[i+1][0] if i + 1 < len(slots) else "24:00"
+            icon = "🔥" if temp >= 20.0 else ("🌿" if temp >= 17.0 else "❄️")
+            lines.append(f"• `{start_t} - {end_t}` ➔ {icon} *{temp:.1f}°C*")
+
+        lines.append("\nConfermi l'invio della nuova programmazione al termostato tramite MQTT?")
+        confirm_text = "\n".join(lines)
+
+        self.pending_schedule_confirms[chat_id] = {
+            "title": "Programmazione Personalizzata",
+            "payload": payload,
+            "time": time.time()
+        }
+        self.pending_schedule_inputs.pop(chat_id, None)
+
+        confirm_kb = {
+            "inline_keyboard": [
+                [
+                    {"text": "✅ Conferma e Invia via MQTT", "callback_data": "sched_confirm"},
+                    {"text": "❌ Annulla", "callback_data": "sched_cancel"}
+                ]
+            ]
+        }
+        self.send_message(chat_id, confirm_text, reply_markup=confirm_kb)
 
     def _build_logs_keyboard(self, current_category="all", current_page=0, total_pages=1, view_mode="table"):
         cats = [
@@ -453,6 +738,19 @@ class TelegramBot:
             if act == "dry": return "Clima Daikin DRY 💧"
             if act == "off": return "Clima Daikin SPENTO 🔴"
             return f"Clima Daikin {act.upper()}"
+
+        elif "bticino" in dev_k or "termostato" in dev_k:
+            if act.startswith("boost"):
+                mins = act.split("_")[1] if "_" in act else "30"
+                return f"Termostato BTicino BOOST {mins}m 🔥"
+            elif act.startswith("manual") or act.startswith("temp") or act.startswith("set_"):
+                t = act.split("_")[1] if "_" in act else "21"
+                return f"Termostato BTicino SET {t}°C 🌡️"
+            elif act in ["auto", "home", "programma"]:
+                return "Termostato BTicino AUTO 📅"
+            elif act in ["off", "spento"]:
+                return "Termostato BTicino SPENTO 🔴"
+            return f"Termostato BTicino {act.upper()}"
             
         if name_label:
             clean_lbl = name_label.replace(" (Accendi)", " ACCESO 🟢").replace(" (Spegni)", " SPENTO 🔴").replace(" (Apri)", " APRI 🚪")
@@ -719,6 +1017,41 @@ class TelegramBot:
 
                 # Aggiorna il messaggio in-place rimuovendo i pulsanti
                 self._edit_message_text(chat_id, msg_id, result_text)
+
+        elif data == "ask_clean_climate_zeros":
+            self._answer_callback_query(cb_id, "Richiesta conferma...")
+            confirm_text = (
+                "⚠️ *CONFERMA PULIZIA DATI CLIMA*\n\n"
+                "Nello storico delle ultime 24 ore sono stati rilevati campionamenti anomali a **0.0°C** "
+                "(causati da disconnessioni temporanee del cloud Netatmo).\n\n"
+                "Sei sicuro di voler eliminare questi record errati dal database e ricalcolare il grafico?"
+            )
+            confirm_kb = {
+                "inline_keyboard": [
+                    [
+                        {"text": "✅ Conferma Eliminazione", "callback_data": "confirm_clean_climate_zeros"},
+                        {"text": "❌ Annulla", "callback_data": "cmd_cancel"}
+                    ]
+                ]
+            }
+            self.send_message(chat_id, confirm_text, reply_markup=confirm_kb)
+
+        elif data == "confirm_clean_climate_zeros":
+            self._answer_callback_query(cb_id, "Pulizia in corso...")
+            if hasattr(self.tracker, "event_logger") and self.tracker.event_logger:
+                ok, count = self.tracker.event_logger.clean_zero_climate_data(hours=48)
+                if ok:
+                    user_tag = self._get_user_display_name(callback.get("from", {}), chat_id)
+                    self.tracker.event_logger.log_event("command", user_tag, f"Eliminati {count} valori a 0°C dal clima")
+                    self._edit_message_text(chat_id, msg_id, f"✅ *PULIZIA COMPLETATA CON SUCCESSO*\n\nRimossi **{count} campionamenti a 0.0°C** dal database.\n⏳ _Generazione del grafico ricalcolato in corso..._")
+                    
+                    chart_path = self.tracker.event_logger.generate_climate_chart(hours=24, tracker=self.tracker)
+                    if chart_path and os.path.exists(chart_path):
+                        self.send_photo(chat_id, chart_path, caption="📊 **Grafico Clima Ricalcolato (Senza Valori a 0°C)**")
+                else:
+                    self._edit_message_text(chat_id, msg_id, "❌ *Errore durante l'eliminazione dei valori anomali dal database.*")
+            else:
+                self._edit_message_text(chat_id, msg_id, "❌ *Modulo EventLogger non disponibile.*")
 
         elif data == "cmd_cancel":
             self._answer_callback_query(cb_id, "Comando annullato.")
@@ -1887,6 +2220,21 @@ class TelegramBot:
             elif c_input:
                 self.pending_copies_inputs.pop(chat_id, None)
 
+            # Controllo se l'utente sta digitando le fasce orarie per il termostato
+            s_input = self.pending_schedule_inputs.get(chat_id)
+            if s_input and (time.time() - s_input.get("time", 0) < 600):
+                if text.strip().lower() in ["/annulla", "annulla", "/cancel", "cancel"]:
+                    self.pending_schedule_inputs.pop(chat_id, None)
+                    self.send_message(chat_id, "❌ *Modifica della programmazione termostato annullata.*")
+                    return
+                elif text.startswith("/") and not text.startswith("/programma"):
+                    self.pending_schedule_inputs.pop(chat_id, None)
+                else:
+                    self._handle_schedule_input_text(chat_id, text)
+                    return
+            elif s_input:
+                self.pending_schedule_inputs.pop(chat_id, None)
+
             # Altrimenti esegui i comandi normali
             self.handle_command(chat_id, text)
 
@@ -1974,6 +2322,7 @@ class TelegramBot:
                 "⚡ /consumi - **Consumi Elettrici** (Watt istantanei e grafico 24h)\n"
                 "📊 /stato - **Dashboard Domotica Completa** (Shelly + Sensori + Altri device)\n"
                 "🌡️ /clima - **Stato Dettagliato Clima & Termostato** (Daikin + BTicino)\n"
+                "🔥 /termostato - **Controllo Termostato BTicino** (Timer, Boost, Manuale, Auto)\n"
                 "⚡ /powerstatus - **Stato Alimentazione Corrente & Home Server**\n"
                 "🖥️ /serverstatus - **Salute e Diagnostica Hardware Home Server NVR**\n"
                 "🌐 /networkstatus - **Stato Nodi di Rete** (Firewall, Home Server, AP Box)\n"
@@ -2202,13 +2551,51 @@ class TelegramBot:
             self.send_message(chat_id, report)
 
         elif cmd in ["/clima", "/climate", "/termostato", "/daikin"]:
+            args = text_clean.split()[1:]
+            if cmd == "/termostato" and args:
+                subcmd = args[0].lower()
+                if subcmd in ["boost", "timer"]:
+                    mins = args[1] if len(args) > 1 and args[1].isdigit() else "30"
+                    ok, res = self.tracker.send_device_command("Bticino", f"boost_{mins}")
+                    self.send_message(chat_id, res)
+                    return
+                elif subcmd in ["auto", "home", "programma"]:
+                    ok, res = self.tracker.send_device_command("Bticino", "auto")
+                    self.send_message(chat_id, res)
+                    return
+                elif subcmd in ["set", "manual", "temperatura", "temp"]:
+                    t_val = args[1] if len(args) > 1 else "21"
+                    ok, res = self.tracker.send_device_command("Bticino", f"manual_{t_val}")
+                    self.send_message(chat_id, res)
+                    return
+                else:
+                    try:
+                        t_float = float(subcmd.replace(",", "."))
+                        ok, res = self.tracker.send_device_command("Bticino", f"manual_{t_float}")
+                        self.send_message(chat_id, res)
+                        return
+                    except ValueError:
+                        pass
+
             self.send_message(chat_id, "⏳ _Recupero informazioni dettagliate clima e termoregolazione in corso..._")
             report = self.tracker.get_climate_report()
-            self.send_message(chat_id, report)
+
+            # Rilevamento presenza campionamenti anomali a 0°C
+            has_zeros = False
+            if hasattr(self.tracker, "event_logger") and self.tracker.event_logger:
+                has_zeros = self.tracker.event_logger.has_zero_climate_data(hours=24)
+
+            t_keyboard = self._build_thermostat_keyboard(has_zeros=has_zeros) if cmd == "/termostato" else None
+            self.send_message(chat_id, report, reply_markup=t_keyboard)
+
             if hasattr(self.tracker, "event_logger") and self.tracker.event_logger:
                 chart_path = self.tracker.event_logger.generate_climate_chart(hours=24, tracker=self.tracker)
                 if chart_path and os.path.exists(chart_path):
-                    self.send_photo(chat_id, chart_path)
+                    # Se /clima e ci sono valori a zero, aggiungiamo il tasto sotto la foto del grafico
+                    photo_kb = None
+                    if cmd in ["/clima", "/climate"] and has_zeros:
+                        photo_kb = {"inline_keyboard": [[{"text": "🧹 Elimina valori anomali a 0°C", "callback_data": "ask_clean_climate_zeros"}]]}
+                    self.send_photo(chat_id, chart_path, reply_markup=photo_kb)
 
 
         elif cmd in ["/powerstatus", "/power", "/corrente", "/blackout"]:

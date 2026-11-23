@@ -92,6 +92,31 @@ class NetatmoController:
             print(f"Errore get_home_status: {e}")
             return {}
 
+    def get_homes_data(self, home_id=None):
+        token = self.get_access_token()
+        if not token:
+            print("[!] get_homes_data annullata: Access Token non disponibile.")
+            return {}
+
+        url = f"{self.base_url}/api/homesdata"
+        params = {}
+        if home_id:
+            params["home_id"] = home_id
+        headers = {"Authorization": f"Bearer {token}"}
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=10)
+            res_json = resp.json()
+            if isinstance(res_json, dict):
+                body = res_json.get("body")
+                if isinstance(body, dict):
+                    return body
+                if "error" in res_json:
+                    print(f"[!] Errore API Netatmo get_homes_data: {res_json.get('error')}")
+            return {}
+        except Exception as e:
+            print(f"Errore get_homes_data: {e}")
+            return {}
+
     def set_room_thermostat(self, home_id, room_id, mode, temp=None, duration=None):
         token = self.get_access_token()
         if not token:
@@ -122,10 +147,17 @@ class NetatmoController:
 
         url = f"{self.base_url}/api/synchomeschedule"
         headers = {"Authorization": f"Bearer {token}"}
-        payload = {"home_id": home_id, "therm_schedule": schedule_data}
+        if isinstance(schedule_data, dict):
+            payload = dict(schedule_data)
+            if "home_id" not in payload:
+                payload["home_id"] = home_id
+        else:
+            payload = {"home_id": home_id, "therm_schedule": schedule_data}
         try:
             resp = requests.post(url, json=payload, headers=headers, timeout=15)
-            return resp.json()
+            res_json = resp.json()
+            print(f"[Netatmo] sync_home_schedule result: {res_json}")
+            return res_json
         except Exception as e:
             print(f"Errore synchomeschedule: {e}")
             return None

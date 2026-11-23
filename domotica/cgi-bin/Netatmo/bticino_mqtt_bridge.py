@@ -47,11 +47,15 @@ def on_message(client, userdata, msg):
         if msg.topic == f"{BASE_TOPIC}/request_update":
             publish_status(client)
 
+        elif msg.topic == f"{BASE_TOPIC}/request_schedule":
+            publish_schedule(client)
+
         elif msg.topic == f"{BASE_TOPIC}/sync_schedule":
             schedule_json = json.loads(payload)
             print(f"Sincronizzazione pianificazione: {schedule_json.get('name')}")
             netatmo.sync_home_schedule(HOME_ID, schedule_json)
             time.sleep(2)
+            publish_schedule(client)
             publish_status(client)
 
         elif msg.topic == f"{BASE_TOPIC}/boost":
@@ -72,6 +76,24 @@ def on_message(client, userdata, msg):
 
     except Exception as e: print(f"Errore Bridge: {e}")
 
+def publish_schedule(client):
+    try:
+        homes_data = netatmo.get_homes_data(HOME_ID)
+        if not homes_data:
+            return
+        homes = homes_data.get("homes", [])
+        if not homes:
+            return
+        home = homes[0]
+        schedules = home.get("schedules", [])
+        if not schedules:
+            return
+        active_sched = next((s for s in schedules if s.get("selected")), schedules[0])
+        client.publish(f"{BASE_TOPIC}/schedule", json.dumps(active_sched), retain=True)
+        print(f"[Bridge] Pubblicata pianificazione attiva su MQTT: {active_sched.get('name')}")
+    except Exception as e:
+        print(f"[!] Errore publish_schedule: {e}")
+
 def publish_status(client):
     status = netatmo.get_home_status(HOME_ID)
     if status:
@@ -80,6 +102,7 @@ def publish_status(client):
         room = next((r for r in rooms if str(r["id"]) == str(ROOM_ID)), None)
 
         humidity = None
+        boiler_status = False
         if room and "humidity" in room:
             humidity = room.get("humidity")
         elif modules:
@@ -88,13 +111,24 @@ def publish_status(client):
                     humidity = mod.get("humidity")
                     break
 
+        if modules:
+            for mod in modules:
+                if "boiler_status" in mod:
+                    boiler_status = bool(mod.get("boiler_status"))
+                    break
+
         if room:
+            heating_power = room.get("heating_power_request", 0)
+            flame_active = bool((heating_power is not None and heating_power > 0) or boiler_status)
             data = {
                 "current_temp": room.get("therm_measured_temperature"),
                 "target_temp": room.get("therm_setpoint_temperature"),
                 "humidity": humidity,
                 "mode": room.get("therm_setpoint_mode"),
-                "active_schedule": status.get("home", {}).get("therm_schedule_id")
+                "active_schedule": status.get("home", {}).get("therm_schedule_id"),
+                "heating_power": heating_power,
+                "boiler_status": boiler_status,
+                "flame_active": flame_active
             }
             client.publish(f"{BASE_TOPIC}/status", json.dumps(data), retain=True)
         else:
@@ -147,7 +181,10 @@ if __name__ == "__main__":
         t_poll.start()
 
         # Invia subito il primo stato all'avvio in background
-        threading.Thread(target=publish_status, args=(client,), daemon=True, name="InitialStatusThread").start()
+        def _initial_sync():
+            publish_status(client)
+            publish_schedule(client)
+        threading.Thread(target=_initial_sync, daemon=True, name="InitialSyncThread").start()
         client.loop_forever()
     else:
         print("[!] Impossibile connettersi al broker MQTT dopo 30 tentativi.")

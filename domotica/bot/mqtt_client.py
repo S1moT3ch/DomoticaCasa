@@ -78,6 +78,7 @@ class MQTTDeviceTracker(ReportsMixin, NetworkMixin, AlertsMixin, ParsersMixin):
         self.gate_notify_delay = getattr(config, "GATE_OPEN_NOTIFY_DELAY", 5.0)
 
         self.termostato_data = None
+        self.termostato_schedule = None
         self.daikin_data = None
         self.bosch_data = None
         self.humidity_alerts_sent = {}  # { "Termostato BTicino": bool, "Climatizzatore Daikin": bool }
@@ -384,6 +385,51 @@ class MQTTDeviceTracker(ReportsMixin, NetworkMixin, AlertsMixin, ParsersMixin):
                     self.client.publish("shellies/AllarmeIO.shelly/relay/0/command", cmd_str)
                     state_txt = "ACCESA 🟢" if is_on else "SPENTA 🔴"
                     return True, f"Camera Corridoio (AllarmeIO Output 0) impostata su **{state_txt}**"
+
+                # 8. Termostato BTicino Smarther2 / Netatmo
+                elif device_key in ["Bticino", "Termostato", "termostato_bticino", "bticino"]:
+                    action_str = str(action).strip().lower()
+
+                    # Timer / Boost (es. boost, boost_30, boost_60, boost_90)
+                    if action_str.startswith("boost"):
+                        parts = action_str.split("_")
+                        mins = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 30
+                        self.client.publish("Termostato.bticino/boost", str(mins))
+                        return True, f"🔥 **Boost Termostato BTicino avviato:** 30°C per **{mins} minuti** ⏱️"
+
+                    # Accensione Manuale con temperatura (es. manual_21, manual_21.5, temp_20, set_22)
+                    elif action_str.startswith("manual_") or action_str.startswith("temp_") or action_str.startswith("set_"):
+                        parts = action_str.split("_")
+                        try:
+                            target_t = float(parts[1])
+                        except (IndexError, ValueError):
+                            target_t = 21.0
+                        self.client.publish("Termostato.bticino/temp", str(target_t))
+                        return True, f"🌡️ **Termostato BTicino impostato in Manuale a {target_t:.1f}°C** 🟢"
+
+                    # Ripristino Programma Automatico
+                    elif action_str in ["auto", "home", "programma"]:
+                        self.client.publish("Termostato.bticino/mode", "home")
+                        return True, "📅 **Termostato BTicino ripristinato su Programma Automatico** 🔄"
+
+                    # Altre modalità Netatmo
+                    elif action_str in ["off", "spento"]:
+                        self.client.publish("Termostato.bticino/mode", "off")
+                        return True, "🔴 **Termostato BTicino impostato su SPENTO**"
+                    elif action_str in ["frostguard", "antigelo"]:
+                        self.client.publish("Termostato.bticino/mode", "frostguard")
+                        return True, "❄️ **Termostato BTicino impostato su ANTIGELO**"
+                    elif action_str in ["away", "fuori"]:
+                        self.client.publish("Termostato.bticino/mode", "away")
+                        return True, "🚶‍♂️ **Termostato BTicino impostato su FUORI CASA (Away)**"
+                    else:
+                        try:
+                            target_t = float(action_str)
+                            self.client.publish("Termostato.bticino/temp", str(target_t))
+                            return True, f"🌡️ **Termostato BTicino impostato in Manuale a {target_t:.1f}°C** 🟢"
+                        except ValueError:
+                            return False, f"Azione non riconosciuta per Termostato BTicino: {action}"
+
 
                 else:
                     return False, f"Dispositivo sconosciuto: {device_key}"

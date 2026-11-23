@@ -363,6 +363,7 @@ class ParsersMixin:
         # Request update per Termostato BTicino / Netatmo e Clima Daikin
         try:
             self.client.publish("Termostato.bticino/request_update", "STATUS")
+            self.client.publish("Termostato.bticino/request_schedule", "GET")
             self.client.publish("Canalizzato.daikin/request_update", "STATUS")
         except Exception:
             pass
@@ -477,6 +478,12 @@ class ParsersMixin:
 
         # --- 0. TERMOSTATO BTICINO / NETATMO E CLIMA DAIKIN ---
         if topic_lower.startswith("termostato.bticino"):
+            if topic_lower.endswith("/schedule"):
+                if isinstance(json_data, dict):
+                    self.termostato_schedule = json_data
+                    print(f"[MQTT] Ricevuta pianificazione termostato: {json_data.get('name')}")
+                return None
+
             if isinstance(json_data, dict):
                 self.termostato_data = json_data
                 hum = json_data.get("humidity")

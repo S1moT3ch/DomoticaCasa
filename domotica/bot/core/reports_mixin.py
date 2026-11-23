@@ -83,6 +83,7 @@ class ReportsMixin:
         try:
             if self.client and self.connected:
                 self.client.publish("Termostato.bticino/request_update", "STATUS")
+                self.client.publish("Termostato.bticino/request_schedule", "GET")
                 self.client.publish("Canalizzato.daikin/request_update", "refresh")
                 import time
                 time.sleep(3.0)  # Attende la risposta asincrona dai bridge via MQTT prima di impaginare
@@ -146,8 +147,23 @@ class ReportsMixin:
                 if hum is not None:
                     lines.append(f"• *Umidità Stanza*: *{hum}%*")
                 lines.append(f"• *Modalità*: `{mode}`")
+
+                # Fiamma e Caldaia Status
+                boiler_on = bool(t.get("boiler_status", False))
+                heating_pw = t.get("heating_power", 0)
+                flame_active = bool(t.get("flame_active", False) or boiler_on or (heating_pw and heating_pw > 0))
+
+                if flame_active or boiler_on:
+                    pw_str = f" ({heating_pw}%)" if heating_pw else ""
+                    lines.append(f"• *Fiamma & Caldaia*: 🔥 **ACCESA — Riscaldamento termosifoni in corso**{pw_str}")
+                else:
+                    lines.append("• *Fiamma & Caldaia*: ⚪ **SPENTA / A RIPOSO** (In temperatura)")
+
                 if sched:
-                    lines.append(f"• *Programma Attivo*: `{sched}`")
+                    sched_name = sched
+                    if hasattr(self, "termostato_schedule") and isinstance(self.termostato_schedule, dict):
+                        sched_name = self.termostato_schedule.get("name", sched)
+                    lines.append(f"• *Programma Attivo*: `{sched_name}`")
                 lines.append("")
 
             if not has_climate:
